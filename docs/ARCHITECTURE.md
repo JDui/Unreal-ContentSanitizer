@@ -270,6 +270,8 @@ The settings fingerprint must include behavior-relevant texture properties. Cand
 
 The final field list must be documented in code/tests and covered by regression cases.
 
+For the v0.1 `Texture2D` provider, fingerprint schema version 2 defines source payload as every source block descriptor, every layer format, and every block/layer/mip byte sequence. The settings domain conservatively includes color adjustments and source color management, compression and Oodle choices, mip generation/loading and LOD behavior, addressing/filtering, virtual-texture behavior, padding/resizing, chroma keying, compositing, normal/gamma processing, and per-layer format overrides. Adding or removing any of these inputs requires an explicit schema-version review.
+
 ### Classification examples
 
 ```text

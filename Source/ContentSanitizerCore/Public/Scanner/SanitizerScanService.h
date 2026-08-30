@@ -28,7 +28,7 @@ public:
     FSanitizerScanResult Scan(const FSanitizerScanRequest& Request);
 
 private:
-    bool bCancelRequested = false;
+    TAtomic<bool> bCancelRequested { false };
     uint64 NextRevision = 1;
     TArray<TSharedRef<IAssetFingerprintProvider>> Providers;
     const IAssetFingerprintProvider* FindProvider(const FAssetData& AssetData) const;

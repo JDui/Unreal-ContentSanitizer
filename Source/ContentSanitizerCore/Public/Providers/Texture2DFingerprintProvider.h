@@ -5,7 +5,9 @@
 class CONTENTSANITIZERCORE_API FTexture2DFingerprintProvider final : public IAssetFingerprintProvider
 {
 public:
-    static constexpr uint32 SchemaVersion = 1;
+    // Version 2 covers every TextureSource block/layer/mip and the documented
+    // Texture2D behavior settings used by the v0.1 equivalence contract.
+    static constexpr uint32 SchemaVersion = 2;
     virtual FName GetProviderId() const override;
     virtual uint32 GetSchemaVersion() const override;
     virtual bool Supports(const FAssetData& AssetData) const override;

@@ -7,6 +7,20 @@ bool FSanitizerActionPlanner::CreatePlan(const FSanitizerDuplicateGroup& Group, 
         OutError = TEXT("Only a proven Safe Duplicate group with a valid canonical asset can be planned.");
         return false;
     }
+    const FSanitizerFingerprint& CanonicalFingerprint = Group.Members[Group.CanonicalMemberIndex].Fingerprint;
+    if (!CanonicalFingerprint.bDeepVerified)
+    {
+        OutError = TEXT("The canonical asset does not have a completed deep-equivalence proof.");
+        return false;
+    }
+    for (const FSanitizerDuplicateMember& Member : Group.Members)
+    {
+        if (!Member.Fingerprint.bDeepVerified || Member.Fingerprint.SchemaVersion != CanonicalFingerprint.SchemaVersion || Member.Fingerprint.PayloadHash != CanonicalFingerprint.PayloadHash || Member.Fingerprint.SettingsHash != CanonicalFingerprint.SettingsHash)
+        {
+            OutError = TEXT("Every planned member must share the canonical asset's verified payload, settings, and schema.");
+            return false;
+        }
+    }
     OutPlan = {};
     OutPlan.PlanId = Group.GroupId;
     OutPlan.ProviderId = Group.ProviderId.ToString();
@@ -19,6 +33,7 @@ bool FSanitizerActionPlanner::CreatePlan(const FSanitizerDuplicateGroup& Group, 
     {
         if (Index != Group.CanonicalMemberIndex) { OutPlan.SourceAssets.Add(FSoftObjectPath(Group.Members[Index].Record.GetObjectPath())); }
     }
+    OutPlan.SourceAssets.Sort([](const FSoftObjectPath& Left, const FSoftObjectPath& Right) { return Left.ToString() < Right.ToString(); });
     OutError.Reset();
     return true;
 }

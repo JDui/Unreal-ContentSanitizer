@@ -51,9 +51,9 @@ Scope
 v0.1 implementation is available for exact `Texture2D` duplicate workflows:
 
 - Asset Registry-first `/Game` scan with developer-content exclusion by default;
-- source-payload and behavior-settings fingerprints, with `Safe Duplicate` and `Review Required` results;
+- schema-versioned source-payload fingerprints covering every block/layer/mip and conservative behavior-settings fingerprints, with `Safe Duplicate`, `Review Required`, and blocked conflict results;
 - dockable Slate tab, scan summary, virtualized result list, inspector text, and safe-only action queue;
-- immutable action plans, mandatory revalidation/preflight, Unreal-native consolidation, and post-operation verification;
+- verified immutable action plans, mandatory revalidation/read-only-package preflight, explicit execution confirmation, Unreal-native consolidation, and asset/reference post-operation verification;
 - UE Automation test discovery sources and a disposable test-host project.
 
 ## Build packages
@@ -66,3 +66,11 @@ On a Windows machine with the matching Unreal Engine installation, create a pack
 ```
 
 The resulting Win64 Editor plugin folders are written to `dist\UE5.5` and `dist\UE5.8`.
+
+Build the disposable UE 5.8 test host and run all `ContentSanitizer` automation tests with:
+
+```powershell
+.\Scripts\Test-Plugin.ps1
+```
+
+The test script creates a temporary project-plugin junction for Unreal's normal plugin discovery and removes it after the run.

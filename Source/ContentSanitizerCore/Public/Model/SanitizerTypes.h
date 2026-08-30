@@ -70,6 +70,7 @@ struct FSanitizerScanSummary
     int32 DuplicateGroups = 0;
     int32 SafeGroups = 0;
     int32 ReviewGroups = 0;
+    int32 ConflictGroups = 0;
     int64 EstimatedReclaimableSize = 0;
 };
 

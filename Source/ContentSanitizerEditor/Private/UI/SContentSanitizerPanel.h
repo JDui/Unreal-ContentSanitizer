@@ -18,6 +18,9 @@ private:
     FReply AddSelectedToQueue();
     FReply PreflightQueue();
     FReply ExecuteQueue();
+    bool CanAddSelectedToQueue() const;
+    bool CanPreflightQueue() const;
+    bool CanExecuteQueue() const;
     TSharedRef<ITableRow> GenerateGroupRow(TSharedPtr<FSanitizerDuplicateGroup> Item, const TSharedRef<STableViewBase>& OwnerTable);
     void OnSelectionChanged(TSharedPtr<FSanitizerDuplicateGroup> Item, ESelectInfo::Type SelectInfo);
     void RefreshPresentation();
@@ -29,6 +32,7 @@ private:
     TArray<TSharedPtr<FSanitizerDuplicateGroup>> GroupItems;
     TSharedPtr<FSanitizerDuplicateGroup> SelectedGroup;
     TArray<FSanitizerActionPlan> ActionQueue;
+    bool bQueuePreflightPassed = false;
     FSanitizerScanResult LastResult;
     TUniquePtr<FSanitizerScanService> ScanService;
 };
