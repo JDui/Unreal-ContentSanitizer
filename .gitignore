@@ -1,0 +1,16 @@
+# Unreal Engine and generated build output
+dist/
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# Local editor and IDE state
+.vs/
+.idea/
+*.suo
+*.user
+*.userprefs
+
+# Generated logs
+*.log

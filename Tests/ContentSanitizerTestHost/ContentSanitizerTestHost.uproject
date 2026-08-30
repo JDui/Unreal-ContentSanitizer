@@ -1,0 +1,9 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.8",
+  "Category": "Tests",
+  "Description": "Disposable automation-test host for Content Sanitizer.",
+  "Plugins": [
+    { "Name": "ContentSanitizer", "Enabled": true }
+  ]
+}

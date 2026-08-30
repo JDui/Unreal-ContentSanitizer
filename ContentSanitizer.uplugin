@@ -1,0 +1,15 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "Content Sanitizer",
+  "Description": "Safe, explainable Texture2D duplicate detection and consolidation.",
+  "Category": "Editor",
+  "CreatedBy": "Content Sanitizer",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Modules": [
+    { "Name": "ContentSanitizerCore", "Type": "Editor", "LoadingPhase": "Default" },
+    { "Name": "ContentSanitizerEditor", "Type": "Editor", "LoadingPhase": "Default" }
+  ]
+}

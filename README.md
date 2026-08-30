@@ -48,4 +48,21 @@ Scope
 
 ## Status
 
-The repository is currently in the **design/specification stage**. Implementation should begin with Milestone 0 in [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md): plugin/module skeleton, dockable Slate tab, minimal test host, and automation-test discovery.
+v0.1 implementation is available for exact `Texture2D` duplicate workflows:
+
+- Asset Registry-first `/Game` scan with developer-content exclusion by default;
+- source-payload and behavior-settings fingerprints, with `Safe Duplicate` and `Review Required` results;
+- dockable Slate tab, scan summary, virtualized result list, inspector text, and safe-only action queue;
+- immutable action plans, mandatory revalidation/preflight, Unreal-native consolidation, and post-operation verification;
+- UE Automation test discovery sources and a disposable test-host project.
+
+## Build packages
+
+On a Windows machine with the matching Unreal Engine installation, create a packaged plugin with:
+
+```powershell
+.\Scripts\Build-Plugin.ps1 -EngineVersion 5.5
+.\Scripts\Build-Plugin.ps1 -EngineVersion 5.8
+```
+
+The resulting Win64 Editor plugin folders are written to `dist\UE5.5` and `dist\UE5.8`.
