@@ -1,8 +1,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
+#include "Cache/SanitizerFingerprintCache.h"
 #include "Engine/Texture2D.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Operations/SanitizerActionPlan.h"
 #include "Providers/Texture2DFingerprintProvider.h"
+#include "Scanner/SanitizerScanService.h"
 
 namespace ContentSanitizerTests
 {
@@ -129,6 +134,99 @@ bool FContentSanitizerDuplicateSourceShapeTest::RunTest(const FString& Parameter
     Plan.SourceAssets.Add(FSoftObjectPath(TEXT("/Game/Test/Source.Source")));
     const FSanitizerPreflightResult Result = FSanitizerActionPlanner::ValidateShape(Plan);
     TestEqual(TEXT("Duplicate source identities are blocked"), Result.Status, ESanitizerPreflightStatus::Blocked);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentSanitizerWildcardCandidateUniquenessTest, "ContentSanitizer.Unit.Scanner.WildcardCandidatesAreUnique", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FContentSanitizerWildcardCandidateUniquenessTest::RunTest(const FString& Parameters)
+{
+    UTexture2D* First = ContentSanitizerTests::MakeTexture({ 1, 2, 3, 4 });
+    UTexture2D* Second = ContentSanitizerTests::MakeTexture({ 5, 6, 7, 8 });
+    UTexture2D* Wildcard = ContentSanitizerTests::MakeTexture({ 9, 10, 11, 12 });
+    FSanitizerAssetRecord FirstRecord; FirstRecord.AssetData = FAssetData(First);
+    FSanitizerAssetRecord SecondRecord; SecondRecord.AssetData = FAssetData(Second);
+    FSanitizerAssetRecord WildcardRecord; WildcardRecord.AssetData = FAssetData(Wildcard);
+
+    TMap<FString, TArray<FSanitizerAssetRecord>> Buckets;
+    Buckets.Add(TEXT("Texture2D|2x2"), { FirstRecord, SecondRecord, WildcardRecord });
+    Buckets.Add(TEXT("Texture2D|*"), { WildcardRecord });
+    TArray<FSanitizerAssetRecord> Candidates;
+    ContentSanitizerScan::BuildUniqueCandidateRecords(Buckets, Candidates);
+
+    TestEqual(TEXT("Wildcard candidate expansion keeps one record per object path"), Candidates.Num(), 3);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentSanitizerSafeReclaimableSizeTest, "ContentSanitizer.Unit.Scanner.ReclaimableSizeCountsSafeGroupsOnly", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FContentSanitizerSafeReclaimableSizeTest::RunTest(const FString& Parameters)
+{
+    FSanitizerDuplicateGroup Group;
+    Group.CanonicalMemberIndex = 0;
+    Group.Members.SetNum(3);
+    Group.Members[0].Record.EstimatedDiskSize = 100;
+    Group.Members[1].Record.EstimatedDiskSize = 20;
+    Group.Members[2].Record.EstimatedDiskSize = 30;
+    Group.Classification = ESanitizerClassification::ReviewRequired;
+    TestEqual(TEXT("Review-required groups do not claim reclaimable size"), ContentSanitizerScan::CalculateSafeReclaimableSize(Group), int64(0));
+    Group.Classification = ESanitizerClassification::SafeDuplicate;
+    TestEqual(TEXT("Safe groups count only non-canonical members"), ContentSanitizerScan::CalculateSafeReclaimableSize(Group), int64(50));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentSanitizerScanCancellationTest, "ContentSanitizer.Unit.Scanner.CancelTransitionsToCanceled", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FContentSanitizerScanCancellationTest::RunTest(const FString& Parameters)
+{
+    FSanitizerScanService Service;
+    FSanitizerScanRequest Request;
+    Request.PackagePaths = { FName(TEXT("/Game/__ContentSanitizerTests/NoAssets")) };
+    Service.BeginScan(Request);
+    TestTrue(TEXT("Scan session is active before cancellation is observed"), Service.IsScanActive());
+    Service.RequestCancel();
+    TestFalse(TEXT("Canceled scan stops on the next incremental tick"), Service.TickScan());
+    TestEqual(TEXT("Canceled scan publishes an explicit canceled state"), Service.GetResult().State, ESanitizerSessionState::Canceled);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentSanitizerFingerprintCacheRoundTripTest, "ContentSanitizer.Unit.Cache.RoundTripAndInvalidation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FContentSanitizerFingerprintCacheRoundTripTest::RunTest(const FString& Parameters)
+{
+    const FString Filename = FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("AXICacheTest-"), TEXT(".bin"));
+    ON_SCOPE_EXIT
+    {
+        IFileManager::Get().Delete(*Filename, false, true);
+        IFileManager::Get().Delete(*(Filename + TEXT(".tmp")), false, true);
+    };
+
+    FSanitizerFingerprintCache Cache(Filename);
+    FSanitizerFingerprintCacheEntry Entry;
+    Entry.ObjectPath = TEXT("/Game/Test/Texture.Texture");
+    Entry.PackageName = TEXT("/Game/Test/Texture");
+    Entry.ProviderId = TEXT("Texture2D");
+    Entry.ChangeIdentity = TEXT("PackageSavedHash:test");
+    Entry.Fingerprint.SchemaVersion = FTexture2DFingerprintProvider::SchemaVersion;
+    const uint8 PayloadBytes[] = { 1, 2, 3, 4 };
+    const uint8 SettingsBytes[] = { 5, 6, 7, 8 };
+    Entry.Fingerprint.PayloadHash = FIoHash::HashBuffer(PayloadBytes, sizeof(PayloadBytes));
+    Entry.Fingerprint.SettingsHash = FIoHash::HashBuffer(SettingsBytes, sizeof(SettingsBytes));
+    Entry.Fingerprint.Settings.Add(TEXT("SRGB"), TEXT("true"));
+    Entry.Fingerprint.bDeepVerified = true;
+    Cache.Upsert(Entry);
+
+    FString Error;
+    TestTrue(TEXT("Fingerprint cache saves"), Cache.Save(Error));
+    FSanitizerFingerprintCache Reloaded(Filename);
+    TestTrue(TEXT("Fingerprint cache loads"), Reloaded.Load(Error));
+    const FSanitizerFingerprintCacheEntry* Match = Reloaded.FindValid(Entry.ObjectPath, Entry.ProviderId, Entry.Fingerprint.SchemaVersion, Entry.ChangeIdentity);
+    TestNotNull(TEXT("Matching change identity reuses the cached fingerprint"), Match);
+    if (Match)
+    {
+        TestEqual(TEXT("Cached payload hash survives round trip"), Match->Fingerprint.PayloadHash, Entry.Fingerprint.PayloadHash);
+        TestEqual(TEXT("Cached settings hash survives round trip"), Match->Fingerprint.SettingsHash, Entry.Fingerprint.SettingsHash);
+        TestTrue(TEXT("Loaded fingerprint retains completed proof state"), Match->Fingerprint.bDeepVerified);
+    }
+    TestNull(TEXT("Changed package identity invalidates the cache entry"), Reloaded.FindValid(Entry.ObjectPath, Entry.ProviderId, Entry.Fingerprint.SchemaVersion, TEXT("PackageSavedHash:changed")));
+    TestNull(TEXT("Changed provider invalidates the cache entry"), Reloaded.FindValid(Entry.ObjectPath, TEXT("OtherProvider"), Entry.Fingerprint.SchemaVersion, Entry.ChangeIdentity));
+    TestNull(TEXT("Changed schema invalidates the cache entry"), Reloaded.FindValid(Entry.ObjectPath, Entry.ProviderId, Entry.Fingerprint.SchemaVersion + 1, Entry.ChangeIdentity));
     return true;
 }
 #endif

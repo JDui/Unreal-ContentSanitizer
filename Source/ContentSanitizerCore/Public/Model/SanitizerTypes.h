@@ -26,6 +26,7 @@ struct FSanitizerAssetRecord
     int64 EstimatedDiskSize = 0;
     int32 HardReferenceCount = 0;
     int32 SoftReferenceCount = 0;
+    FString ChangeIdentity;
 
     FString GetObjectPath() const { return AssetData.GetObjectPathString(); }
 };
@@ -70,7 +71,10 @@ struct FSanitizerScanSummary
     int32 DuplicateGroups = 0;
     int32 SafeGroups = 0;
     int32 ReviewGroups = 0;
+    int32 SimilarGroups = 0;
     int32 ConflictGroups = 0;
+    int32 CachedFingerprints = 0;
+    int32 IncrementalFingerprints = 0;
     int64 EstimatedReclaimableSize = 0;
 };
 
@@ -78,9 +82,9 @@ inline FString SanitizerClassificationToText(ESanitizerClassification Classifica
 {
     switch (Classification)
     {
-    case ESanitizerClassification::SafeDuplicate: return TEXT("Safe Duplicate");
-    case ESanitizerClassification::ReviewRequired: return TEXT("Review Required");
-    case ESanitizerClassification::Similar: return TEXT("Similar");
-    default: return TEXT("Conflict");
+    case ESanitizerClassification::SafeDuplicate: return TEXT("安全重复项");
+    case ESanitizerClassification::ReviewRequired: return TEXT("需要复核");
+    case ESanitizerClassification::Similar: return TEXT("相似项");
+    default: return TEXT("冲突");
     }
 }

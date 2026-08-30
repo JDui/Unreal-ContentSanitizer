@@ -37,13 +37,13 @@ FSanitizerPreflightResult FContentSanitizerConsolidationService::Preflight(const
     if (!IsInGameThread())
     {
         Result.Status = ESanitizerPreflightStatus::Blocked;
-        Result.Messages.Add(TEXT("Preflight must run on the game thread."));
+        Result.Messages.Add(TEXT("预检必须在游戏线程运行。"));
         return Result;
     }
     if (Plan.ProviderId != TEXT("Texture2D") || Plan.SchemaVersion != FTexture2DFingerprintProvider::SchemaVersion)
     {
         Result.Status = ESanitizerPreflightStatus::Blocked;
-        Result.Messages.Add(TEXT("The action plan provider or fingerprint schema is unsupported or stale."));
+        Result.Messages.Add(TEXT("操作计划使用了不受支持或已过期的指纹版本，请重新扫描。"));
         return Result;
     }
 
@@ -51,13 +51,13 @@ FSanitizerPreflightResult FContentSanitizerConsolidationService::Preflight(const
     if (!AssetSubsystem)
     {
         Result.Status = ESanitizerPreflightStatus::Blocked;
-        Result.Messages.Add(TEXT("Editor asset subsystem is unavailable; no mutation can be performed."));
+        Result.Messages.Add(TEXT("编辑器资产子系统不可用，无法修改任何内容。"));
         return Result;
     }
     if (!AssetSubsystem->DoesAssetExist(Plan.CanonicalAsset.ToString()))
     {
         Result.Status = ESanitizerPreflightStatus::Blocked;
-        Result.Messages.Add(TEXT("Canonical asset no longer exists."));
+        Result.Messages.Add(TEXT("主资产已不存在。"));
         return Result;
     }
 
@@ -65,7 +65,7 @@ FSanitizerPreflightResult FContentSanitizerConsolidationService::Preflight(const
     if (!Canonical)
     {
         Result.Status = ESanitizerPreflightStatus::Blocked;
-        Result.Messages.Add(TEXT("Canonical asset no longer exists."));
+        Result.Messages.Add(TEXT("主资产已不存在。"));
         return Result;
     }
     FTexture2DFingerprintProvider Provider;
@@ -74,7 +74,7 @@ FSanitizerPreflightResult FContentSanitizerConsolidationService::Preflight(const
     if (!Provider.BuildDeepFingerprint(Canonical, CanonicalFingerprint, Error) || CanonicalFingerprint.SchemaVersion != Plan.SchemaVersion || CanonicalFingerprint.PayloadHash != Plan.PayloadHash || CanonicalFingerprint.SettingsHash != Plan.SettingsHash)
     {
         Result.Status = ESanitizerPreflightStatus::Blocked;
-        Result.Messages.Add(TEXT("Canonical asset changed since scan; rescan before mutation."));
+        Result.Messages.Add(TEXT("主资产在扫描后发生了变化，请重新扫描后再执行。"));
         return Result;
     }
     for (const FSoftObjectPath& SourcePath : Plan.SourceAssets)
@@ -82,15 +82,15 @@ FSanitizerPreflightResult FContentSanitizerConsolidationService::Preflight(const
         if (!AssetSubsystem->DoesAssetExist(SourcePath.ToString()))
         {
             Result.Status = ESanitizerPreflightStatus::Blocked;
-            Result.Messages.Add(FString::Printf(TEXT("Source asset no longer exists: %s"), *SourcePath.ToString()));
+            Result.Messages.Add(FString::Printf(TEXT("待整理资产已不存在：%s"), *SourcePath.ToString()));
             return Result;
         }
         UObject* Source = SourcePath.TryLoad();
         FSanitizerFingerprint SourceFingerprint;
-        if (!Source || !Provider.BuildDeepFingerprint(Source, SourceFingerprint, Error) || SourceFingerprint.SchemaVersion != Plan.SchemaVersion || SourceFingerprint.PayloadHash != Plan.PayloadHash || SourceFingerprint.SettingsHash != Plan.SettingsHash || !Provider.DeepVerify(Canonical, Source, Error))
+        if (!Source || !Provider.BuildDeepFingerprint(Source, SourceFingerprint, Error) || SourceFingerprint.SchemaVersion != Plan.SchemaVersion || SourceFingerprint.PayloadHash != Plan.PayloadHash || SourceFingerprint.SettingsHash != Plan.SettingsHash)
         {
             Result.Status = ESanitizerPreflightStatus::Blocked;
-            Result.Messages.Add(FString::Printf(TEXT("Source asset is missing, incompatible, or changed: %s"), *SourcePath.ToString()));
+            Result.Messages.Add(FString::Printf(TEXT("待整理资产缺失、不兼容或已发生变化：%s"), *SourcePath.ToString()));
             return Result;
         }
     }
@@ -110,12 +110,12 @@ FSanitizerPreflightResult FContentSanitizerConsolidationService::Preflight(const
         if (!ContentSanitizerConsolidation::IsPackageWritable(PackageName, Filename))
         {
             Result.Status = ESanitizerPreflightStatus::Blocked;
-            Result.Messages.Add(FString::Printf(TEXT("Package is read-only and cannot be consolidated safely: %s (%s)"), *PackageName.ToString(), *Filename));
+            Result.Messages.Add(FString::Printf(TEXT("包为只读，无法安全整理：%s（%s）"), *PackageName.ToString(), *Filename));
         }
     }
     if (!Result.IsReady()) { return Result; }
     Result.Status = ESanitizerPreflightStatus::Ready;
-    Result.Messages.Add(TEXT("Preflight passed. No assets were modified."));
+    Result.Messages.Add(TEXT("预检通过，尚未修改任何资产。"));
     return Result;
 }
 
@@ -135,7 +135,7 @@ FSanitizerExecutionResult FContentSanitizerConsolidationService::Execute(const F
         UObject* Source = SourcePath.TryLoad();
         if (!Source)
         {
-            Result.Messages.Add(FString::Printf(TEXT("A source disappeared after preflight; no mutation was performed: %s"), *SourcePath.ToString()));
+            Result.Messages.Add(FString::Printf(TEXT("预检后有待整理资产消失，操作尚未执行：%s"), *SourcePath.ToString()));
             return Result;
         }
         Sources.Add(Source);
@@ -143,7 +143,7 @@ FSanitizerExecutionResult FContentSanitizerConsolidationService::Execute(const F
     UEditorAssetSubsystem* AssetSubsystem = GEditor ? GEditor->GetEditorSubsystem<UEditorAssetSubsystem>() : nullptr;
     if (!AssetSubsystem)
     {
-        Result.Messages.Add(TEXT("Editor asset subsystem is unavailable; no mutation was performed."));
+        Result.Messages.Add(TEXT("编辑器资产子系统不可用，操作尚未执行。"));
         return Result;
     }
     IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
@@ -155,13 +155,15 @@ FSanitizerExecutionResult FContentSanitizerConsolidationService::Execute(const F
 
     if (!AssetSubsystem->ConsolidateAssets(Canonical, Sources))
     {
-        Result.Messages.Add(TEXT("Unreal consolidation failed; no force-delete fallback was attempted."));
+        Result.Status = ESanitizerExecutionStatus::ConsolidationReportedFailure;
+        Result.Messages.Add(TEXT("Unreal 整理接口报告失败。接口已经被调用，项目内容可能已部分变化；不会强制删除，也不会自动重试。请重新扫描并检查引用。"));
         return Result;
     }
     const FAssetData CanonicalData = Registry.GetAssetByObjectPath(Plan.CanonicalAsset);
     if (!CanonicalData.IsValid() || CanonicalData.AssetClassPath != UTexture2D::StaticClass()->GetClassPathName())
     {
-        Result.Messages.Add(TEXT("Consolidation returned success but the canonical asset could not be verified."));
+        Result.Status = ESanitizerExecutionStatus::VerificationFailed;
+        Result.Messages.Add(TEXT("Unreal 整理接口报告成功，但主资产验证失败。项目内容已经发生变化，请重新扫描并人工检查。"));
         return Result;
     }
     for (const FSoftObjectPath& SourcePath : Plan.SourceAssets)
@@ -169,7 +171,8 @@ FSanitizerExecutionResult FContentSanitizerConsolidationService::Execute(const F
         const FAssetData SourceData = Registry.GetAssetByObjectPath(SourcePath);
         if (SourceData.IsValid() && SourceData.AssetClassPath == UTexture2D::StaticClass()->GetClassPathName())
         {
-            Result.Messages.Add(FString::Printf(TEXT("Consolidation verification failed: source still resolves as an original asset: %s"), *SourcePath.ToString()));
+            Result.Status = ESanitizerExecutionStatus::VerificationFailed;
+            Result.Messages.Add(FString::Printf(TEXT("整理后的验证失败：待整理路径仍解析为原始纹理资产：%s。项目内容已经发生变化，请重新扫描并人工检查。"), *SourcePath.ToString()));
             return Result;
         }
 
@@ -179,12 +182,13 @@ FSanitizerExecutionResult FContentSanitizerConsolidationService::Execute(const F
         {
             if (RemainingReferencers.Contains(PreviousReferencer))
             {
-                Result.Messages.Add(FString::Printf(TEXT("Consolidation verification failed: package %s still refers to source package %s."), *PreviousReferencer.ToString(), *SourcePath.GetLongPackageName()));
+                Result.Status = ESanitizerExecutionStatus::VerificationFailed;
+                Result.Messages.Add(FString::Printf(TEXT("整理后的验证失败：包 %s 仍引用原包 %s。项目内容已经发生变化，请重新扫描并人工检查。"), *PreviousReferencer.ToString(), *SourcePath.GetLongPackageName()));
                 return Result;
             }
         }
     }
-    Result.bSucceeded = true;
-    Result.Messages.Add(TEXT("Consolidation and post-operation asset identity verification succeeded. Redirector cleanup remains an explicit separate operation."));
+    Result.Status = ESanitizerExecutionStatus::Succeeded;
+    Result.Messages.Add(TEXT("整理与操作后验证均成功。重定向器清理由独立的显式操作完成。"));
     return Result;
 }

@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath $project)) { throw "Test host project was not f
 New-Item -ItemType Directory -Path $pluginsDirectory -Force | Out-Null
 if (Test-Path -LiteralPath $pluginLink)
 {
-    throw "Test plugin link already exists; remove it before running this script: $pluginLink"
+    throw "Test plugin junction already exists; remove it before running: $pluginLink"
 }
 
 try
@@ -39,7 +39,7 @@ try
     $createdLink = New-Item -ItemType Junction -Path $pluginLink -Target $stagingPlugin
     if ($createdLink.Target -notcontains $stagingPlugin)
     {
-        throw "Test plugin junction did not resolve to the staged plugin directory."
+        throw "Test plugin junction did not resolve to the staging plugin directory."
     }
 
     & $build UnrealEditor Win64 Development "-Project=$project" -WaitMutex -NoHotReload
@@ -57,7 +57,7 @@ finally
         {
             throw "Refusing to remove a non-junction test plugin path: $pluginLink"
         }
-        Remove-Item -LiteralPath $pluginLink -Force
+        Remove-Item -LiteralPath $pluginLink -Force -Recurse -Confirm:$false
     }
     if (Test-Path -LiteralPath $stagingRoot)
     {

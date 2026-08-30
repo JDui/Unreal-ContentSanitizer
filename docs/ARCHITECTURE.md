@@ -133,6 +133,14 @@ Rules:
 - cancellation must produce a consistent terminal state;
 - partial results must be marked partial or discarded explicitly;
 - stale results must not silently execute destructive actions without revalidation.
+- editor-facing scans advance through bounded per-frame ticks so Slate can repaint and process cancellation between assets;
+- wildcard cheap metadata widens candidate extraction, but candidate object paths remain globally unique.
+
+### Persistent fingerprint index
+
+Completed candidate fingerprints are indexed at `Saved/AXICleanCache/FingerprintIndex.bin`. Cache identity includes object path, provider id, fingerprint schema version, and a package change identity. Prefer Asset Registry `PackageSavedHash`; use package file size and modification time only as a fallback. Loaded dirty packages never use cached fingerprints.
+
+The index is an acceleration layer, not mutation authority. Preflight always rebuilds canonical and source fingerprints from current assets. A corrupt, stale, provider-mismatched, or schema-mismatched cache entry is ignored and rebuilt. Scoped scans may prune missing entries only inside their explicit package paths.
 
 ## 5. Scan stage details
 
@@ -371,11 +379,13 @@ Action Plan
  -> UEditorAssetSubsystem::ConsolidateAssets
  -> Collect operation result
  -> Verify references/state
- -> Mark success/warnings/failure
+ -> Mark NotExecuted / ConsolidationReportedFailure / VerificationFailed / Succeeded
  -> Optional redirector cleanup
 ```
 
 Do not implement a fallback that force-deletes source assets when consolidation fails.
+
+Once `ConsolidateAssets` has been invoked, a false return value must not be described as "nothing changed." Both a reported API failure and a post-operation verification failure mean project content may already have changed; stop the queue, require a rescan, and do not automatically retry that plan.
 
 ## 13. Post-operation verification
 

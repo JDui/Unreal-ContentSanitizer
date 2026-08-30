@@ -270,6 +270,10 @@ Maintain tests equivalent to this matrix:
 
 The implementation may use more detailed statuses, but it must never promote an uncertain state to `SafeDuplicate`.
 
+Scanner regression coverage must also prove that wildcard cheap-bucket expansion produces one candidate per object path, cancellation reaches an explicit terminal state on an incremental tick, and reclaimable size excludes every non-safe classification.
+
+Persistent-cache tests must cover deterministic round-trip serialization plus invalidation on change-identity, provider, and fingerprint-schema mismatch. Tests must use disposable cache paths and remove generated files.
+
 ## 12. Consolidation safety fixture
 
 A canonical integration fixture should create at least:

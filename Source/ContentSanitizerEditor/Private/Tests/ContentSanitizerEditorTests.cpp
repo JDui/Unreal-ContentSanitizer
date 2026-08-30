@@ -4,11 +4,14 @@
 #include "ContentSanitizerTestReferenceAsset.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Model/SanitizerTypes.h"
 #include "Providers/Texture2DFingerprintProvider.h"
+#include "Scanner/SanitizerScanService.h"
 #include "Subsystems/EditorAssetSubsystem.h"
 
 namespace ContentSanitizerEditorTests
@@ -57,7 +60,7 @@ namespace ContentSanitizerEditorTests
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentSanitizerPresentationTest, "ContentSanitizer.Unit.Presentation.SafeStatusText", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FContentSanitizerPresentationTest::RunTest(const FString& Parameters)
 {
-    TestEqual(TEXT("Safe status has accessible text"), SanitizerClassificationToText(ESanitizerClassification::SafeDuplicate), FString(TEXT("Safe Duplicate")));
+    TestEqual(TEXT("Safe status has accessible Chinese text"), SanitizerClassificationToText(ESanitizerClassification::SafeDuplicate), FString(TEXT("安全重复项")));
     return true;
 }
 
@@ -71,6 +74,18 @@ bool FContentSanitizerStaleSchemaPreflightTest::RunTest(const FString& Parameter
     Plan.SourceAssets.Add(FSoftObjectPath(TEXT("/Game/__ContentSanitizerTests/MissingSource.MissingSource")));
     const FSanitizerPreflightResult Result = FContentSanitizerConsolidationService().Preflight(Plan);
     TestEqual(TEXT("Stale fingerprint schema blocks before asset loading"), Result.Status, ESanitizerPreflightStatus::Blocked);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentSanitizerExecutionStatusContractTest, "ContentSanitizer.Unit.Consolidation.ExecutionStatusIsUnambiguous", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FContentSanitizerExecutionStatusContractTest::RunTest(const FString& Parameters)
+{
+    FSanitizerExecutionResult Result;
+    TestTrue(TEXT("Default result means the consolidation API was not invoked"), Result.IsSafeToRetryWithoutRescan());
+    TestFalse(TEXT("Default result does not claim project mutation"), Result.MayHaveModifiedContent());
+    Result.Status = ESanitizerExecutionStatus::ConsolidationReportedFailure;
+    TestFalse(TEXT("A reported API failure is not safe to retry as an unexecuted action"), Result.IsSafeToRetryWithoutRescan());
+    TestTrue(TEXT("A reported API failure explicitly admits possible project mutation"), Result.MayHaveModifiedContent());
     return true;
 }
 
@@ -102,6 +117,25 @@ bool FContentSanitizerConsolidationFixtureTest::RunTest(const FString& Parameter
     TestTrue(TEXT("Duplicate reference fixture saves"), AssetSubsystem->SaveLoadedAsset(DuplicateReference, false));
     TestTrue(TEXT("Unrelated reference fixture saves"), AssetSubsystem->SaveLoadedAsset(UnrelatedReference, false));
 
+    const FString CacheFilename = FPaths::CreateTempFilename(*FPaths::ProjectIntermediateDir(), TEXT("AXIScanCacheTest-"), TEXT(".bin"));
+    ON_SCOPE_EXIT
+    {
+        IFileManager::Get().Delete(*CacheFilename, false, true);
+        IFileManager::Get().Delete(*(CacheFilename + TEXT(".tmp")), false, true);
+    };
+    FSanitizerScanRequest ScanRequest;
+    ScanRequest.PackagePaths = { FName(*FixtureRoot) };
+    ScanRequest.FingerprintCacheFilename = CacheFilename;
+    FSanitizerScanService FirstScanService;
+    const FSanitizerScanResult FirstScan = FirstScanService.Scan(ScanRequest);
+    TestEqual(TEXT("Initial scan completes"), FirstScan.State, ESanitizerSessionState::Completed);
+    TestTrue(TEXT("Initial scan calculates candidate fingerprints"), FirstScan.Summary.IncrementalFingerprints > 0);
+    FSanitizerScanService SecondScanService;
+    const FSanitizerScanResult SecondScan = SecondScanService.Scan(ScanRequest);
+    TestEqual(TEXT("Cached scan completes"), SecondScan.State, ESanitizerSessionState::Completed);
+    TestEqual(TEXT("Unchanged candidates avoid incremental fingerprint work"), SecondScan.Summary.IncrementalFingerprints, 0);
+    TestEqual(TEXT("Every unchanged candidate uses the persistent index"), SecondScan.Summary.CachedFingerprints, SecondScan.Summary.CandidateAssets);
+
     FTexture2DFingerprintProvider Provider;
     FSanitizerFingerprint CanonicalFingerprint;
     FSanitizerFingerprint DuplicateFingerprint;
@@ -121,7 +155,8 @@ bool FContentSanitizerConsolidationFixtureTest::RunTest(const FString& Parameter
     FSanitizerActionPlan Plan;
     TestTrue(TEXT("Verified group creates an action plan"), FSanitizerActionPlanner::CreatePlan(Group, 1, Plan, Error));
     const FSanitizerExecutionResult Execution = FContentSanitizerConsolidationService().Execute(Plan);
-    TestTrue(TEXT("Consolidation and verification succeed"), Execution.bSucceeded);
+    TestTrue(TEXT("Consolidation and verification succeed"), Execution.IsSucceeded());
+    TestEqual(TEXT("Successful execution has an unambiguous status"), Execution.Status, ESanitizerExecutionStatus::Succeeded);
     TestEqual(TEXT("Planned reference is rewritten to canonical"), DuplicateReference->Texture.Get(), Canonical);
     TestEqual(TEXT("Unrelated reference remains unchanged"), UnrelatedReference->Texture.Get(), Unrelated);
     TestTrue(TEXT("Canonical asset still exists"), AssetSubsystem->DoesAssetExist(Canonical->GetPathName()));

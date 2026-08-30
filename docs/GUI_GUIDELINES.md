@@ -141,6 +141,8 @@ Recommended group row fields:
 | References | Optional aggregate/reference signal |
 | Path | Canonical or common path summary |
 
+`Reclaimable` counts only non-canonical members of groups currently eligible for a safe action plan. Review, similar, conflict, and invalid groups contribute zero to the safe-reclaimable summary.
+
 Expanded group rows show individual assets.
 
 Recommended asset row fields:
@@ -153,6 +155,10 @@ Recommended asset row fields:
 - concise reason for recommendation/warning.
 
 Do not load full-size thumbnails for every off-screen row. Thumbnail work should follow visible rows and editor-standard thumbnail mechanisms.
+
+Long scans must show the current stage, processed/total count, percentage, and current asset. Scan work advances incrementally so the cancel control remains actionable. The Content Browser folder context menu may open the same panel with selected package paths as the explicit scan scope; action plans must not include assets outside that scope.
+
+The result area must offer an explicit classification filter for all results, `SafeDuplicate`, `ReviewRequired`, `Similar`, and `Conflict`. The summary reports visible rows, cache hits, and fingerprints recomputed during the current incremental scan.
 
 ## 8. Filtering
 

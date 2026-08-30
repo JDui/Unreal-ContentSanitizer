@@ -1,76 +1,96 @@
-# Unreal Content Sanitizer
+# Unreal 内容重复整理器
 
-Unreal Content Sanitizer is an Unreal Engine Editor asset-hygiene toolkit focused first on **safe, explainable duplicate-asset detection and consolidation**.
+Unreal 内容重复整理器是一款 Unreal Engine 编辑器资产卫生工具，首要目标是提供**安全、可解释的重复资产检测、整理与引用重定向**。
 
-Initial target: **Unreal Engine 5.8**.
+当前优先支持 **Unreal Engine 5.8**。首个版本刻意保持保守：只处理完全重复的 `Texture2D`，分别验证源数据和行为设置，提供只读审查、显式预检，并使用 Unreal 原生资产整理接口执行变更。
 
-The first release is intentionally conservative: exact Texture2D duplicate detection, behavior/settings comparison, review tooling, explicit preflight, and Unreal-native asset consolidation.
+## 功能
 
-## Engineering documents
+- 从 `/Game` 或内容浏览器中选定的目录开始扫描；
+- 大工程扫描按帧推进，显示当前阶段、数量、百分比和正在处理的资产；
+- 扫描期间可取消，取消扫描不会修改项目内容；
+- 已计算的完整指纹会建立索引并缓存到项目的 `Saved/AXICleanCache/FingerprintIndex.bin`；
+- 后续扫描仍会通过 Asset Registry 清点范围，但只有新增、修改、Dirty 或缓存失效的候选资产需要重新加载并计算完整指纹；
+- 纹理载荷指纹覆盖全部数据块、图层和 Mip；
+- 分开比较纹理载荷与会影响行为的设置；
+- 将结果分类为“安全重复项”“需要复核”“相似项”或“冲突”；
+- 可按上述重复类别筛选结果，摘要同时显示缓存命中数与本次增量计算数；
+- 只允许“安全重复项”进入整理队列；
+- 执行前重新验证指纹、资产存在性和受影响包的可写性；
+- 通过 Unreal 原生 `UEditorAssetSubsystem::ConsolidateAssets` 整理资产和重写引用；
+- 操作后验证主资产、来源资产和原引用关系；
+- 不会以强制删除作为失败后的兜底方案。
 
-Coding agents and contributors should read these before implementation:
+## 使用方法
 
-- [`AGENTS.md`](AGENTS.md) - authoritative agent engineering contract.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) - scanner, fingerprint, classification, action-plan, and safety architecture.
-- [`docs/TECH_STACK.md`](docs/TECH_STACK.md) - UE 5.8 technical stack and dependency/threading constraints.
-- [`docs/TESTING.md`](docs/TESTING.md) - mandatory Unreal Automation testing strategy and destructive-operation regression contract.
-- [`docs/GUI_GUIDELINES.md`](docs/GUI_GUIDELINES.md) - Slate UI/UX specification.
-- [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) - milestone sequence and v0.1 release boundary.
+### 从窗口扫描
 
-## Core principles
+在 Unreal 编辑器的“窗口”菜单中选择“内容重复整理”，然后点击“扫描当前范围”。扫描完成后，可以查看重复组、判定依据和设置差异，再将确认安全的组加入队列、执行预检并明确确认整理。
 
-1. Scan first; mutation is a separate explicit phase.
-2. Do not eagerly load the entire project to find duplicates.
-3. Do not use raw `.uasset` equality as semantic duplicate proof.
-4. Separate payload equivalence from behavior/settings equivalence.
-5. Uncertain or merely similar assets are never automatically destructive.
-6. Use Unreal's supported consolidation API for reference replacement/removal.
-7. Revalidate immediately before mutation.
-8. Destructive behavior requires automated regression coverage.
+### 整理指定目录
 
-## Planned v0.1 workflow
+在内容浏览器中右击一个目录，选择“整理此目录的重复内容”。工具窗口会打开并自动扫描所选目录；生成的整理计划只包含该目录范围内的重复资产。引用重定向仍由 Unreal 原生整理接口完成，因此项目中指向这些资产的引用会一并更新。
+
+## 安全原则
+
+1. 扫描是只读阶段，修改必须通过独立且显式的操作完成。
+2. 不会为了寻找重复项而一次性加载整个工程的所有资产。
+3. 不使用原始 `.uasset` 文件是否相同作为语义重复的证明。
+4. 载荷等价与行为/设置等价分别验证。
+5. 不确定或仅仅相似的资产绝不会自动清理。
+6. 使用 Unreal 官方整理接口替换引用和处理来源资产。
+7. 修改前必须重新验证，防止使用过期扫描结果。
+8. 指纹缓存只用于扫描加速；执行整理前仍会绕过缓存并重新计算主资产和待整理资产的指纹。
+9. “接口报告失败”和“执行后验证失败”都表示项目可能已经变化，不会被当作可直接重试的普通失败。
+10. 可回收空间只统计能够进入安全整理计划的资产。
+
+## 扫描流程
 
 ```text
-Scope
- -> Asset Registry inventory
- -> Cheap candidate bucketing
- -> Texture2D source extraction
- -> Payload fingerprint
- -> Settings fingerprint
- -> Safe / Review classification
- -> Inspect / choose canonical asset
- -> Action queue
- -> Dry-run / preflight
- -> Consolidate
- -> Verify
- -> Optional redirector cleanup
+选择范围
+ -> 资产注册表清点
+ -> 低成本候选分桶
+ -> 唯一候选集合
+ -> 校验 Saved/AXICleanCache 指纹索引
+ -> 复用未变化资产的完整指纹
+ -> Texture2D 源数据提取
+ -> 载荷指纹
+ -> 设置指纹
+ -> 安全 / 复核分类
+ -> 审查并选择主资产
+ -> 整理队列
+ -> 只读预检
+ -> Unreal 原生整理与引用重定向
+ -> 操作后验证
+ -> 可选的重定向器清理
 ```
 
-## Status
+## 工程文档
 
-v0.1 implementation is available for exact `Texture2D` duplicate workflows:
+参与开发前请阅读：
 
-- Asset Registry-first `/Game` scan with developer-content exclusion by default;
-- schema-versioned source-payload fingerprints covering every block/layer/mip and conservative behavior-settings fingerprints, with `Safe Duplicate`, `Review Required`, and blocked conflict results;
-- dockable Slate tab, scan summary, virtualized result list, inspector text, and safe-only action queue;
-- verified immutable action plans, mandatory revalidation/read-only-package preflight, explicit execution confirmation, Unreal-native consolidation, and asset/reference post-operation verification;
-- UE Automation test discovery sources and a disposable test-host project.
+- [`AGENTS.md`](AGENTS.md)：自动化贡献者必须遵守的工程约定；
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：扫描、指纹、分类、操作计划与安全架构；
+- [`docs/TECH_STACK.md`](docs/TECH_STACK.md)：UE 5.8 技术栈、依赖和线程约束；
+- [`docs/TESTING.md`](docs/TESTING.md)：Unreal Automation 测试与破坏性操作回归约定；
+- [`docs/GUI_GUIDELINES.md`](docs/GUI_GUIDELINES.md)：Slate 界面与交互规范；
+- [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)：里程碑和 v0.1 范围。
 
-## Build packages
+## 构建与测试
 
-On a Windows machine with the matching Unreal Engine installation, create a packaged plugin with:
+在安装了对应 Unreal Engine 的 Windows 机器上打包插件：
 
 ```powershell
 .\Scripts\Build-Plugin.ps1 -EngineVersion 5.5
 .\Scripts\Build-Plugin.ps1 -EngineVersion 5.8
 ```
 
-The resulting Win64 Editor plugin folders are written to `dist\UE5.5` and `dist\UE5.8`.
+生成的 Win64 编辑器插件位于 `dist\UE5.5` 和 `dist\UE5.8`。
 
-Build the disposable UE 5.8 test host and run all `ContentSanitizer` automation tests with:
+构建一次性 UE 5.8 测试宿主并运行全部 `ContentSanitizer` 自动化测试：
 
 ```powershell
 .\Scripts\Test-Plugin.ps1
 ```
 
-The test script creates a temporary project-plugin junction for Unreal's normal plugin discovery and removes it after the run.
+测试脚本会为 Unreal 的正常插件发现流程创建临时项目插件目录联接，并在运行结束后移除。

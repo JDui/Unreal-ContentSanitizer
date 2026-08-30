@@ -53,8 +53,8 @@ bool FTexture2DFingerprintProvider::BuildCheapFingerprint(const FAssetData& Asse
 {
     FString Dimensions;
     AssetData.GetTagValue(TEXT("Dimensions"), Dimensions);
-    // Missing metadata is represented as a wildcard. The scanner expands wildcard
-    // records into every compatible bucket so it cannot introduce false negatives.
+    // Missing metadata is represented as a wildcard. The scanner widens candidate
+    // extraction while keeping one unique candidate record per object path.
     OutFingerprint.Key = Dimensions.IsEmpty() ? TEXT("Texture2D|*") : FString::Printf(TEXT("Texture2D|%s"), *Dimensions);
     OutError.Reset();
     return true;
@@ -65,14 +65,14 @@ bool FTexture2DFingerprintProvider::BuildDeepFingerprint(UObject* Asset, FSaniti
     UTexture2D* Texture = Cast<UTexture2D>(Asset);
     if (!Texture)
     {
-        OutError = TEXT("Asset is not a Texture2D.");
+        OutError = TEXT("资产不是 Texture2D。");
         return false;
     }
 
     FTextureSource& Source = Texture->Source;
     if (!Source.IsValid())
     {
-        OutError = TEXT("Texture has no valid source data; exact duplicate proof is unavailable.");
+        OutError = TEXT("纹理没有有效的源数据，无法证明其完全重复。");
         return false;
     }
 
@@ -107,7 +107,7 @@ bool FTexture2DFingerprintProvider::BuildDeepFingerprint(UObject* Asset, FSaniti
                 TArray64<uint8> MipData;
                 if (!Source.GetMipData(MipData, BlockIndex, LayerIndex, MipIndex))
                 {
-                    OutError = FString::Printf(TEXT("Unable to extract source block %d, layer %d, mip %d."), BlockIndex, LayerIndex, MipIndex);
+                    OutError = FString::Printf(TEXT("无法提取纹理源数据块 %d、图层 %d、Mip %d。"), BlockIndex, LayerIndex, MipIndex);
                     return false;
                 }
                 const int64 ByteCount = MipData.Num();
@@ -236,12 +236,12 @@ bool FTexture2DFingerprintProvider::DeepVerify(UObject* Left, UObject* Right, FS
     if (!BuildDeepFingerprint(Left, LeftFingerprint, OutError) || !BuildDeepFingerprint(Right, RightFingerprint, OutError)) { return false; }
     if (LeftFingerprint.PayloadHash != RightFingerprint.PayloadHash)
     {
-        OutError = TEXT("Texture source payloads differ.");
+        OutError = TEXT("纹理源数据载荷不同。");
         return false;
     }
     if (LeftFingerprint.SchemaVersion != RightFingerprint.SchemaVersion)
     {
-        OutError = TEXT("Texture fingerprint schema versions differ.");
+        OutError = TEXT("纹理指纹版本不同。");
         return false;
     }
     OutError.Reset();

@@ -2,10 +2,22 @@
 
 #include "Operations/SanitizerActionPlan.h"
 
+enum class ESanitizerExecutionStatus : uint8
+{
+    NotExecuted,
+    ConsolidationReportedFailure,
+    VerificationFailed,
+    Succeeded
+};
+
 struct FSanitizerExecutionResult
 {
-    bool bSucceeded = false;
+    ESanitizerExecutionStatus Status = ESanitizerExecutionStatus::NotExecuted;
     TArray<FString> Messages;
+
+    bool IsSucceeded() const { return Status == ESanitizerExecutionStatus::Succeeded; }
+    bool IsSafeToRetryWithoutRescan() const { return Status == ESanitizerExecutionStatus::NotExecuted; }
+    bool MayHaveModifiedContent() const { return Status != ESanitizerExecutionStatus::NotExecuted; }
 };
 
 class FContentSanitizerConsolidationService
