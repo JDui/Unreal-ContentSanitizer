@@ -12,6 +12,14 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/SListView.h"
 
+namespace ContentSanitizerPanel
+{
+    static bool IsPathWithin(const FString& PackagePath, const FString& RootPath)
+    {
+        return PackagePath == RootPath || PackagePath.StartsWith(RootPath + TEXT("/"));
+    }
+}
+
 void SContentSanitizerPanel::Construct(const FArguments& InArgs)
 {
     ScanService = MakeUnique<FSanitizerScanService>();
@@ -29,7 +37,7 @@ void SContentSanitizerPanel::Construct(const FArguments& InArgs)
         + SVerticalBox::Slot().AutoHeight().Padding(6)
         [
             SNew(SHorizontalBox)
-            + SHorizontalBox::Slot().AutoWidth().Padding(2)[SNew(SButton).Text(FText::FromString(TEXT("扫描当前范围"))).OnClicked(this, &SContentSanitizerPanel::Scan).IsEnabled(this, &SContentSanitizerPanel::CanStartScan)]
+            + SHorizontalBox::Slot().AutoWidth().Padding(2)[SNew(SButton).Text(FText::FromString(TEXT("开始扫描"))).OnClicked(this, &SContentSanitizerPanel::Scan).IsEnabled(this, &SContentSanitizerPanel::CanStartScan)]
             + SHorizontalBox::Slot().AutoWidth().Padding(2)[SNew(SButton).Text(FText::FromString(TEXT("取消扫描"))).OnClicked(this, &SContentSanitizerPanel::CancelScan).IsEnabled(this, &SContentSanitizerPanel::CanCancelScan)]
             + SHorizontalBox::Slot().AutoWidth().Padding(2)[SNew(SButton).Text(FText::FromString(TEXT("加入安全整理队列"))).OnClicked(this, &SContentSanitizerPanel::AddSelectedToQueue).IsEnabled(this, &SContentSanitizerPanel::CanAddSelectedToQueue)]
             + SHorizontalBox::Slot().AutoWidth().Padding(2)[SNew(SButton).Text(FText::FromString(TEXT("预检"))).OnClicked(this, &SContentSanitizerPanel::PreflightQueue).IsEnabled(this, &SContentSanitizerPanel::CanPreflightQueue)]
@@ -45,10 +53,10 @@ void SContentSanitizerPanel::Construct(const FArguments& InArgs)
                 [SNew(STextBlock).Text(this, &SContentSanitizerPanel::GetClassificationFilterText)]
             ]
         ]
-        + SVerticalBox::Slot().AutoHeight().Padding(6, 2)[SAssignNew(ScopeText, STextBlock).Text(FText::FromString(TEXT("扫描范围：/Game")))]
+        + SVerticalBox::Slot().AutoHeight().Padding(6, 2)[SAssignNew(ScopeText, STextBlock)]
         + SVerticalBox::Slot().AutoHeight().Padding(6, 2)[SAssignNew(ScanProgressBar, SProgressBar).Percent(0.0f)]
         + SVerticalBox::Slot().AutoHeight().Padding(6, 2)[SAssignNew(ProgressText, STextBlock).Text(FText::FromString(TEXT("尚未开始扫描")))]
-        + SVerticalBox::Slot().AutoHeight().Padding(6, 2)[SAssignNew(SummaryText, STextBlock).Text(FText::FromString(TEXT("就绪。扫描为只读操作，只有“安全重复项”可加入整理队列。")))]
+        + SVerticalBox::Slot().AutoHeight().Padding(6, 2)[SAssignNew(SummaryText, STextBlock).Text(FText::FromString(TEXT("就绪。选择清理目标后点击“开始扫描”；扫描为只读操作。")))]
         + SVerticalBox::Slot().FillHeight(1.f).Padding(6)
         [
             SNew(SSplitter)
@@ -56,6 +64,7 @@ void SContentSanitizerPanel::Construct(const FArguments& InArgs)
             + SSplitter::Slot().Value(0.35f)[SAssignNew(InspectorText, STextBlock).AutoWrapText(true).Text(FText::FromString(TEXT("请选择一个重复组，查看判定依据和设置差异。")))]
         ]
     ];
+    RefreshScopeText();
 }
 
 FReply SContentSanitizerPanel::Scan()
@@ -64,23 +73,48 @@ FReply SContentSanitizerPanel::Scan()
     return FReply::Handled();
 }
 
-void SContentSanitizerPanel::StartScanForPaths(const TArray<FString>& PackagePaths)
+void SContentSanitizerPanel::SetCleanupPackagePaths(const TArray<FString>& PackagePaths)
 {
     if (!CanStartScan())
     {
-        SummaryText->SetText(FText::FromString(TEXT("当前扫描尚未结束，请先取消或等待完成。")));
+        SummaryText->SetText(FText::FromString(TEXT("当前扫描尚未结束，无法变更清理目标。")));
         return;
     }
-    ScanPackagePaths.Reset();
+    CleanupPackagePaths.Reset();
     for (const FString& Path : PackagePaths)
     {
         FString Normalized = Path;
         Normalized.RemoveFromEnd(TEXT("/"));
-        if (!Normalized.IsEmpty()) { ScanPackagePaths.AddUnique(FName(*Normalized)); }
+        if (!Normalized.IsEmpty()) { CleanupPackagePaths.AddUnique(FName(*Normalized)); }
     }
-    if (ScanPackagePaths.IsEmpty()) { ScanPackagePaths.Add(FName(TEXT("/Game"))); }
-    ScopeText->SetText(FText::FromString(FString::Printf(TEXT("扫描范围：%s（仅处理这些目录内的重复内容）"), *FString::JoinBy(ScanPackagePaths, TEXT("，"), [](FName Path) { return Path.ToString(); }))));
-    BeginIncrementalScan();
+    if (CleanupPackagePaths.IsEmpty()) { CleanupPackagePaths.Add(FName(TEXT("/Game"))); }
+    SelectedGroup.Reset();
+    ActionQueue.Reset();
+    bQueuePreflightPassed = false;
+    LastResult = {};
+    GroupItems.Reset();
+    if (GroupList.IsValid()) { GroupList->RequestListRefresh(); }
+    RefreshScopeText();
+    ProgressText->SetText(FText::FromString(TEXT("尚未开始扫描")));
+    ScanProgressBar->SetPercent(0.0f);
+    SummaryText->SetText(FText::FromString(TEXT("清理目标已设置。比较范围保持为整个 /Game；点击“开始扫描”后才会执行扫描。")));
+}
+
+void SContentSanitizerPanel::RefreshScopeText()
+{
+    if (!ScopeText.IsValid()) { return; }
+    const FString CleanupText = FString::JoinBy(CleanupPackagePaths, TEXT("，"), [](FName Path) { return Path.ToString(); });
+    const FString ComparisonText = FString::JoinBy(ComparisonPackagePaths, TEXT("，"), [](FName Path) { return Path.ToString(); });
+    ScopeText->SetText(FText::FromString(FString::Printf(TEXT("清理目标：%s　|　重复比较范围：%s（只有清理目标内资产允许被整理）"), *CleanupText, *ComparisonText)));
+}
+
+bool SContentSanitizerPanel::IsMemberInCleanupScope(const FSanitizerDuplicateMember& Member) const
+{
+    const FString PackagePath = Member.Record.PackagePath.ToString();
+    return CleanupPackagePaths.ContainsByPredicate([&PackagePath](FName Root)
+    {
+        return ContentSanitizerPanel::IsPathWithin(PackagePath, Root.ToString());
+    });
 }
 
 void SContentSanitizerPanel::BeginIncrementalScan()
@@ -94,7 +128,7 @@ void SContentSanitizerPanel::BeginIncrementalScan()
     bScanCanceledBeforeStart = false;
     ScanProgressBar->SetPercent(0.0f);
     ProgressText->SetText(FText::FromString(TEXT("正在准备扫描…")));
-    SummaryText->SetText(FText::FromString(TEXT("扫描进行中。可随时点击“取消扫描”；取消不会修改项目内容。")));
+    SummaryText->SetText(FText::FromString(TEXT("扫描进行中：从整个比较范围寻找与清理目标重复的资产。可随时取消；扫描不会修改项目内容。")));
     if (!bScanTimerRegistered)
     {
         bScanTimerRegistered = true;
@@ -131,13 +165,13 @@ EActiveTimerReturnType SContentSanitizerPanel::HandleScanTimer(double CurrentTim
     {
         bScanStartPending = false;
         FSanitizerScanRequest Request;
-        Request.PackagePaths = ScanPackagePaths;
-        Request.bIncludePluginContent = ScanPackagePaths.ContainsByPredicate([](FName Path)
+        Request.PackagePaths = ComparisonPackagePaths;
+        Request.bIncludePluginContent = ComparisonPackagePaths.ContainsByPredicate([](FName Path)
         {
             const FString Value = Path.ToString();
             return Value != TEXT("/Game") && !Value.StartsWith(TEXT("/Game/"));
         });
-        Request.bIncludeDeveloperContent = ScanPackagePaths.ContainsByPredicate([](FName Path)
+        Request.bIncludeDeveloperContent = ComparisonPackagePaths.ContainsByPredicate([](FName Path)
         {
             const FString Value = Path.ToString();
             return Value == TEXT("/Game/Developers") || Value.StartsWith(TEXT("/Game/Developers/"));
@@ -169,7 +203,7 @@ void SContentSanitizerPanel::RefreshScanProgress()
     FString Stage;
     switch (Progress.State)
     {
-    case ESanitizerSessionState::Bucketing: Stage = TEXT("阶段 1/2：清点资产并建立候选桶"); break;
+    case ESanitizerSessionState::Bucketing: Stage = TEXT("阶段 1/2：清点比较范围并建立候选桶"); break;
     case ESanitizerSessionState::Fingerprinting: Stage = TEXT("阶段 2/2：读取缓存或计算增量指纹"); break;
     case ESanitizerSessionState::CancelRequested: Stage = TEXT("正在取消扫描"); break;
     case ESanitizerSessionState::Canceled: Stage = TEXT("扫描已取消"); break;
@@ -189,8 +223,65 @@ void SContentSanitizerPanel::PublishScanResult()
         SummaryText->SetText(FText::FromString(TEXT("扫描已取消。扫描为只读操作，未修改任何项目内容。")));
         return;
     }
+    ApplyCleanupScopeToResult();
     RebuildFilteredGroupItems();
     RefreshPresentation();
+}
+
+void SContentSanitizerPanel::ApplyCleanupScopeToResult()
+{
+    TArray<FSanitizerDuplicateGroup> ScopedGroups;
+    FSanitizerScanSummary ScopedSummary = LastResult.Summary;
+    ScopedSummary.DuplicateGroups = 0;
+    ScopedSummary.SafeGroups = 0;
+    ScopedSummary.ReviewGroups = 0;
+    ScopedSummary.SimilarGroups = 0;
+    ScopedSummary.ConflictGroups = 0;
+    ScopedSummary.EstimatedReclaimableSize = 0;
+
+    for (FSanitizerDuplicateGroup& Group : LastResult.Groups)
+    {
+        const bool bTouchesCleanupScope = Group.Members.ContainsByPredicate([this](const FSanitizerDuplicateMember& Member)
+        {
+            return IsMemberInCleanupScope(Member);
+        });
+        if (!bTouchesCleanupScope) { continue; }
+
+        const int32 ExternalCanonicalIndex = Group.Members.IndexOfByPredicate([this](const FSanitizerDuplicateMember& Member)
+        {
+            return !IsMemberInCleanupScope(Member);
+        });
+        if (ExternalCanonicalIndex != INDEX_NONE)
+        {
+            Group.CanonicalMemberIndex = ExternalCanonicalIndex;
+        }
+
+        Group.EstimatedReclaimableSize = 0;
+        if (Group.Classification == ESanitizerClassification::SafeDuplicate)
+        {
+            for (int32 Index = 0; Index < Group.Members.Num(); ++Index)
+            {
+                if (Index != Group.CanonicalMemberIndex && IsMemberInCleanupScope(Group.Members[Index]))
+                {
+                    Group.EstimatedReclaimableSize += FMath::Max<int64>(0, Group.Members[Index].Record.EstimatedDiskSize);
+                }
+            }
+        }
+
+        ++ScopedSummary.DuplicateGroups;
+        switch (Group.Classification)
+        {
+        case ESanitizerClassification::SafeDuplicate: ++ScopedSummary.SafeGroups; break;
+        case ESanitizerClassification::ReviewRequired: ++ScopedSummary.ReviewGroups; break;
+        case ESanitizerClassification::Similar: ++ScopedSummary.SimilarGroups; break;
+        case ESanitizerClassification::Conflict: ++ScopedSummary.ConflictGroups; break;
+        }
+        ScopedSummary.EstimatedReclaimableSize += Group.EstimatedReclaimableSize;
+        ScopedGroups.Add(MoveTemp(Group));
+    }
+
+    LastResult.Groups = MoveTemp(ScopedGroups);
+    LastResult.Summary = MoveTemp(ScopedSummary);
 }
 
 TSharedRef<SWidget> SContentSanitizerPanel::GenerateClassificationFilterWidget(TSharedPtr<FSanitizerClassificationFilter> Item) const
@@ -230,7 +321,7 @@ FReply SContentSanitizerPanel::AddSelectedToQueue()
 {
     FString Error;
     FSanitizerActionPlan Plan;
-    if (!SelectedGroup.IsValid() || !FSanitizerActionPlanner::CreatePlan(*SelectedGroup, LastResult.Revision, Plan, Error))
+    if (!SelectedGroup.IsValid() || !FSanitizerActionPlanner::CreatePlanForScope(*SelectedGroup, LastResult.Revision, CleanupPackagePaths, Plan, Error))
     {
         SummaryText->SetText(FText::FromString(Error.IsEmpty() ? TEXT("请先选择一个“安全重复项”组。") : Error));
         return FReply::Handled();
@@ -242,7 +333,7 @@ FReply SContentSanitizerPanel::AddSelectedToQueue()
     }
     ActionQueue.Add(MoveTemp(Plan));
     bQueuePreflightPassed = false;
-    SummaryText->SetText(FText::FromString(FString::Printf(TEXT("已加入 %d 个安全整理计划。执行整理前必须先通过预检。"), ActionQueue.Num())));
+    SummaryText->SetText(FText::FromString(FString::Printf(TEXT("已加入 %d 个安全整理计划。只有清理目标内资产会作为来源资产；执行前必须先通过预检。"), ActionQueue.Num())));
     return FReply::Handled();
 }
 
@@ -269,7 +360,7 @@ FReply SContentSanitizerPanel::ExecuteQueue()
     int32 SourceCount = 0;
     for (const FSanitizerActionPlan& Plan : ActionQueue) { SourceCount += Plan.SourceAssets.Num(); }
     const FText Confirmation = FText::FromString(FString::Printf(
-        TEXT("确定将 %d 个重复资产整理到 %d 个主资产吗？\n\n队列中的所有计划均已通过预检。Unreal 将重写引用并保存受影响的包，此操作会修改项目内容。"),
+        TEXT("确定将清理目标内的 %d 个重复资产整理到 %d 个主资产吗？\n\n队列中的所有计划均已通过预检。Unreal 将重写引用并保存受影响的包，此操作会修改项目内容。"),
         SourceCount, ActionQueue.Num()));
     if (FMessageDialog::Open(EAppMsgType::YesNo, Confirmation, FText::FromString(TEXT("确认整理重复内容"))) != EAppReturnType::Yes)
     {
@@ -345,7 +436,7 @@ bool SContentSanitizerPanel::CanCancelScan() const
 
 TSharedRef<ITableRow> SContentSanitizerPanel::GenerateGroupRow(TSharedPtr<FSanitizerDuplicateGroup> Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
-    return SNew(STableRow<TSharedPtr<FSanitizerDuplicateGroup>>, OwnerTable)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("%s | %d 个资产 | %s"), *SanitizerClassificationToText(Item->Classification), Item->Members.Num(), *Item->Members[Item->CanonicalMemberIndex].Record.GetObjectPath())))];
+    return SNew(STableRow<TSharedPtr<FSanitizerDuplicateGroup>>, OwnerTable)[SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("%s | %d 个资产 | 主资产 %s"), *SanitizerClassificationToText(Item->Classification), Item->Members.Num(), *Item->Members[Item->CanonicalMemberIndex].Record.GetObjectPath())))];
 }
 
 void SContentSanitizerPanel::OnSelectionChanged(TSharedPtr<FSanitizerDuplicateGroup> Item, ESelectInfo::Type SelectInfo)
@@ -357,7 +448,7 @@ void SContentSanitizerPanel::OnSelectionChanged(TSharedPtr<FSanitizerDuplicateGr
 void SContentSanitizerPanel::RefreshPresentation()
 {
     if (GroupList.IsValid()) { GroupList->RequestListRefresh(); }
-    FString Summary = FString::Printf(TEXT("已清点：%d | 候选：%d | 缓存命中：%d | 增量计算：%d | 重复组：%d | 当前显示：%d | 安全：%d | 需复核：%d | 相似：%d | 冲突：%d | 安全可回收估算：%lld 字节"), LastResult.Summary.InventoriedAssets, LastResult.Summary.CandidateAssets, LastResult.Summary.CachedFingerprints, LastResult.Summary.IncrementalFingerprints, LastResult.Summary.DuplicateGroups, GroupItems.Num(), LastResult.Summary.SafeGroups, LastResult.Summary.ReviewGroups, LastResult.Summary.SimilarGroups, LastResult.Summary.ConflictGroups, LastResult.Summary.EstimatedReclaimableSize);
+    FString Summary = FString::Printf(TEXT("比较范围已清点：%d | 候选：%d | 缓存命中：%d | 增量计算：%d | 涉及清理目标的重复组：%d | 当前显示：%d | 安全：%d | 需复核：%d | 相似：%d | 冲突：%d | 目标范围安全可回收估算：%lld 字节"), LastResult.Summary.InventoriedAssets, LastResult.Summary.CandidateAssets, LastResult.Summary.CachedFingerprints, LastResult.Summary.IncrementalFingerprints, LastResult.Summary.DuplicateGroups, GroupItems.Num(), LastResult.Summary.SafeGroups, LastResult.Summary.ReviewGroups, LastResult.Summary.SimilarGroups, LastResult.Summary.ConflictGroups, LastResult.Summary.EstimatedReclaimableSize);
     if (!LastResult.Errors.IsEmpty())
     {
         Summary += FString::Printf(TEXT(" | %d 个资产无法生成指纹：%s"), LastResult.Errors.Num(), *FString::Join(LastResult.Errors, TEXT(" ")));
@@ -373,7 +464,13 @@ FString SContentSanitizerPanel::BuildInspectorText() const
 {
     if (!SelectedGroup.IsValid()) { return TEXT("请选择一个重复组，查看判定依据和设置差异。"); }
     FString Text = FString::Printf(TEXT("分类：%s\n载荷：相同\n行为设置：%s\n主资产：%s\n\n成员："), *SanitizerClassificationToText(SelectedGroup->Classification), SelectedGroup->Classification == ESanitizerClassification::SafeDuplicate ? TEXT("相同") : TEXT("不同"), *SelectedGroup->Members[SelectedGroup->CanonicalMemberIndex].Record.GetObjectPath());
-    for (const FSanitizerDuplicateMember& Member : SelectedGroup->Members) { Text += FString::Printf(TEXT("\n- %s"), *Member.Record.GetObjectPath()); }
+    for (int32 Index = 0; Index < SelectedGroup->Members.Num(); ++Index)
+    {
+        const FSanitizerDuplicateMember& Member = SelectedGroup->Members[Index];
+        const TCHAR* ScopeLabel = IsMemberInCleanupScope(Member) ? TEXT("清理目标") : TEXT("比较参照");
+        const TCHAR* CanonicalLabel = Index == SelectedGroup->CanonicalMemberIndex ? TEXT("，主资产") : TEXT("");
+        Text += FString::Printf(TEXT("\n- [%s%s] %s"), ScopeLabel, CanonicalLabel, *Member.Record.GetObjectPath());
+    }
     if (SelectedGroup->Members.IsValidIndex(SelectedGroup->CanonicalMemberIndex))
     {
         const FSanitizerDuplicateMember& Canonical = SelectedGroup->Members[SelectedGroup->CanonicalMemberIndex];
