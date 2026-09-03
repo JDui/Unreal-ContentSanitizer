@@ -53,7 +53,7 @@ void FContentSanitizerEditorModule::PopulateFolderContextMenu(UToolMenu* Menu)
     Section.AddMenuEntry(
         TEXT("ContentSanitizer.CleanDuplicateContent"),
         NSLOCTEXT("ContentSanitizer", "FolderCleanLabel", "整理此目录的重复内容"),
-        NSLOCTEXT("ContentSanitizer", "FolderCleanTip", "打开工具并仅扫描所选目录。只有验证为安全重复项的资产才可在预检后整理并重定向引用。"),
+        NSLOCTEXT("ContentSanitizer", "FolderCleanTip", "将所选目录设为清理目标并打开工具。不会自动扫描；开始扫描后会与整个 /Game 比较，只有目标目录内资产允许被整理。"),
         FSlateIcon(),
         FUIAction(FExecuteAction::CreateLambda([this, PackagePaths]() { OpenForPackagePaths(PackagePaths); })));
 }
@@ -63,6 +63,6 @@ void FContentSanitizerEditorModule::OpenForPackagePaths(TArray<FString> PackageP
     FGlobalTabmanager::Get()->TryInvokeTab(TabName);
     if (const TSharedPtr<SContentSanitizerPanel> Panel = PanelWidget.Pin())
     {
-        Panel->StartScanForPaths(PackagePaths);
+        Panel->SetCleanupPackagePaths(PackagePaths);
     }
 }
