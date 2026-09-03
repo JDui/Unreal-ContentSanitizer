@@ -20,7 +20,7 @@ public:
     SLATE_BEGIN_ARGS(SContentSanitizerPanel) {}
     SLATE_END_ARGS()
     void Construct(const FArguments& InArgs);
-    void StartScanForPaths(const TArray<FString>& PackagePaths);
+    void SetCleanupPackagePaths(const TArray<FString>& PackagePaths);
 private:
     FReply Scan();
     FReply CancelScan();
@@ -32,10 +32,13 @@ private:
     bool CanExecuteQueue() const;
     bool CanStartScan() const;
     bool CanCancelScan() const;
+    bool IsMemberInCleanupScope(const FSanitizerDuplicateMember& Member) const;
     EActiveTimerReturnType HandleScanTimer(double CurrentTime, float DeltaTime);
     void BeginIncrementalScan();
     void PublishScanResult();
+    void ApplyCleanupScopeToResult();
     void RefreshScanProgress();
+    void RefreshScopeText();
     TSharedRef<SWidget> GenerateClassificationFilterWidget(TSharedPtr<FSanitizerClassificationFilter> Item) const;
     void OnClassificationFilterChanged(TSharedPtr<FSanitizerClassificationFilter> Item, ESelectInfo::Type SelectInfo);
     FText GetClassificationFilterText() const;
@@ -60,7 +63,8 @@ private:
     bool bQueuePreflightPassed = false;
     FSanitizerScanResult LastResult;
     TUniquePtr<FSanitizerScanService> ScanService;
-    TArray<FName> ScanPackagePaths { FName(TEXT("/Game")) };
+    TArray<FName> CleanupPackagePaths { FName(TEXT("/Game")) };
+    TArray<FName> ComparisonPackagePaths { FName(TEXT("/Game")) };
     bool bScanStartPending = false;
     bool bScanTimerRegistered = false;
     bool bScanCanceledBeforeStart = false;
