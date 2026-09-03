@@ -26,5 +26,6 @@ class CONTENTSANITIZERCORE_API FSanitizerActionPlanner
 {
 public:
     static bool CreatePlan(const FSanitizerDuplicateGroup& Group, uint64 ScanRevision, FSanitizerActionPlan& OutPlan, FString& OutError);
+    static bool CreatePlanForScope(const FSanitizerDuplicateGroup& Group, uint64 ScanRevision, const TArray<FName>& CleanupPackagePaths, FSanitizerActionPlan& OutPlan, FString& OutError);
     static FSanitizerPreflightResult ValidateShape(const FSanitizerActionPlan& Plan);
 };
