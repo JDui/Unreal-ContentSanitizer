@@ -4,7 +4,7 @@ This document defines the approved technical stack for Unreal Content Sanitizer 
 
 ## 1. Baseline
 
-- Engine target: **Unreal Engine 5.8**.
+- Engine targets: **Unreal Engine 5.5 and 5.8**, both mandatory acceptance lanes.
 - Language: C++ using Unreal Build Tool's engine-default language standard.
 - Plugin class: Editor tooling plugin.
 - UI framework: Slate.
@@ -29,6 +29,7 @@ Responsibilities:
 - equivalence classification;
 - canonical-asset scoring;
 - action-plan data models;
+- orphan reference/protection evidence and deletion-plan rules;
 - pure validation logic;
 - testable provider interfaces.
 
@@ -50,6 +51,7 @@ Responsibilities:
 - inspector/property-diff presentation;
 - source-control/editor state integration;
 - consolidation execution;
+- orphan deletion execution and verification through a separately preflighted service;
 - redirector cleanup;
 - notifications and Message Log integration.
 
@@ -65,7 +67,7 @@ Prefer these Unreal-native systems:
 | Texture source data | `FTextureSource` |
 | Reference discovery | Asset Registry dependency/referencer APIs |
 | Consolidation | `UEditorAssetSubsystem::ConsolidateAssets` |
-| Redirector cleanup | `AssetTools` / `IAssetTools` |
+| Redirector cleanup | Ordinary `ObjectTools` deletion of verified unreferenced redirectors; broader fix-up remains excluded |
 | UI | `Slate`, `SlateCore`, `FAppStyle` |
 | Menus | `ToolMenus` |
 | Docking | Global tab manager / nomad tab registration |
@@ -192,7 +194,7 @@ Exact signatures may change to improve threading/error reporting, but provider r
 
 Initial provider: `Texture2D`.
 
-Planned later providers, in approximate order:
+The active stage remains `Texture2D`-only for duplicates. Other asset types in orphan inspection do not imply duplicate-equivalence support. Possible providers after this stage, subject to a separate scope decision:
 
 1. `TextureCube`.
 2. `MaterialInstance`.
@@ -291,7 +293,7 @@ Fingerprint schema versions must be code-owned constants, not editable project p
 
 ## 13. Caching
 
-Fingerprint caching is a later optimization, not a prerequisite for correctness.
+Fingerprint caching is implemented as a scan optimization, never a prerequisite or authority for mutation correctness.
 
 A cache entry should be invalidated by at least:
 
@@ -313,7 +315,7 @@ Package-level saved hash can be useful as a cache invalidation signal, but not a
 - Avoid hidden singleton services unless the Unreal subsystem model clearly fits the lifetime.
 - No emoji in source code or comments.
 
-## 15. Explicitly rejected stack choices for v0.1
+## 15. Explicitly rejected stack choices for the active stage
 
 Do not introduce these without a new architecture decision:
 
@@ -325,3 +327,17 @@ Do not introduce these without a new architecture decision:
 - Third-party image similarity/AI libraries.
 - Perceptual hashing used for automatic deletion.
 - Custom reference rewriting replacing Unreal's consolidation system.
+
+## 16. Dual-engine delivery
+
+UE 5.5 and 5.8 must both build the Core/Editor modules and pass the full stage acceptance suite. Keep compatibility handling localized without weakening safety behavior on either engine. Do not assume identical fingerprints across engine versions; cache/provider schema compatibility must remain explicit.
+
+Both build and test entry points accept 5.5/5.8. `Test-Plugin.ps1` copies the plugin and a dedicated C++ Editor host to a unique temporary directory, prohibits engine/plugin changes, runs unattended/NullRHI automation serially, and retains reports plus cleanup evidence outside the temporary host. It does not link or build the repository plugin in place. Tooling availability is not acceptance evidence; see `VALIDATION_2026-10-28.md` for actual lane outcomes and GUI limitations.
+
+### Operation state and compatibility
+
+An Editor subsystem keeps an in-memory journal of operation identifiers already submitted to native mutation APIs. Such plans cannot replay, including after reported failure; new scan/review/plan is required. This state is separate from widgets and stores no raw asset pointers. Plans and reviewed preflights bind exact scope, membership, evidence and impact. Compatibility wrappers localize 5.5/5.8 package-object enumeration and package metadata changes.
+
+### Conservative redirector deletion decision
+
+UE 5.5 `IAssetTools::FixupReferencers` always opens a modal report, including with checkout prompting disabled. The active workflow therefore only removes already-unreferenced redirectors through the same ordinary reference-checking `ObjectTools::DeleteObjects` boundary. It performs no reference rewrite or collection fix-up. Scope, destination, users, write state and package companions are preflighted; package absence and destination survival are verified. Referenced redirectors and active source control are blocked by this deliberately narrower policy.

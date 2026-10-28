@@ -2,6 +2,8 @@
 
 This document describes the intended architecture of Unreal Content Sanitizer. It is a design constraint for implementation agents, not merely a conceptual overview.
 
+The active stage is defined in `../AGENTS.md` section 11 (2026-10-28). Sections describing fingerprints and consolidation apply to duplicates; section 20 defines the independent single-asset orphan workflow. Requirements here are not claims that every service already exists.
+
 ## 1. Architectural goals
 
 The system must optimize for:
@@ -249,7 +251,7 @@ The exact generic result/snapshot types are implementation choices. The key cons
 
 ## 7. Texture2D provider contract
 
-v0.1 starts with exact Texture2D duplicate detection.
+The active stage retains exact Texture2D duplicate detection only.
 
 ### Payload domain
 
@@ -413,7 +415,7 @@ Do not assume every future sanitizer is duplicate-based.
 
 Long-term architecture should allow scan rules such as:
 
-- unused asset candidates;
+- cluster/root-reachability analysis beyond the active single-asset orphan workflow;
 - redirector inventory;
 - broken/missing references;
 - oversized assets;
@@ -433,7 +435,7 @@ public:
 };
 ```
 
-Do not build this abstraction prematurely if v0.1 does not require it; preserve boundaries so it can be added cleanly later.
+Do not build a generic rule framework merely for future expansion; preserve boundaries between the two active workflows.
 
 ## 16. Persistence and cache
 
@@ -498,3 +500,51 @@ Therefore:
 - do not interpret similarity as deletion authority;
 - use Unreal-supported mutation APIs;
 - preserve detailed failure reporting.
+
+## 20. Active-stage scope, orphan evidence, and deletion
+
+### Scope and plans
+
+Model cleanup target, evidence scope, and mutation impact separately. Duplicate comparison defaults to `/Game`; reference discovery includes all available registered users regardless of cleanup folder or candidate asset family. Out-of-target assets cannot silently become sources/deletion targets, but referencing packages outside the target may need modification during consolidation and must appear in the reviewed impact.
+
+Canonical recommendation belongs in a non-widget policy: prefer equivalent assets outside the target, then apply deterministic scoring. Manual override is allowed among proven equivalent members and invalidates existing preflight/confirmation. Scope, membership, evidence, or impact changes likewise invalidate plans. Execution must enforce scope from the plan, not trust the widget that created it.
+
+### Independent orphan evidence model
+
+Orphan candidates do not need semantic fingerprints or canonical assets. Store asset/package identity, incoming reference evidence, protection flags, coverage/readiness, errors, outgoing metadata, and scan/policy revision. Keep per-item evidence classification separate from deletion-preflight readiness.
+
+Zero observed incoming hard/soft references is a candidate signal only. Applicable management/protection references, loaded or dirty/unsaved state, and multi-object package companions must be accounted for before deletion. Missing registry readiness, failed queries/loads, unsupported asset states, or other failed required checks must not produce action-ready status. Self-package graph edges may be omitted from external counts, but that must not hide other objects sharing the package.
+
+Known soft/management users block deletion. Configuration/code/dynamic-string use is a documented coverage limitation: show it explicitly and require informed confirmation without claiming exhaustive absence of use. Protected assets/roots remain blocked; user confirmation does not waive known blockers.
+
+The direction of references matters. `Mesh -> Material` says that the mesh uses a material; it does not say that another asset uses the mesh. Project/default/engine/empty material slots are inspector/filter metadata only. Metadata extraction failure is an unknown field, never proof of orphan status.
+
+Single-asset analysis does not discover orphan clusters, cycles, or assets unreachable from chosen maps. No deletion plan may expand to dependencies or newly exposed candidates. A new scan/review/plan is needed for those candidates.
+
+### Deletion service and verification
+
+Core owns non-destructive plan/rule models. Editor owns engine/editor checks, the deletion API call, and verification. Slate collects intent and displays evidence/results; it does not implement deletion policy or invoke deletion directly.
+
+`Inventory -> Evidence -> Review -> Exact deletion plan -> Read-only preflight -> Confirm -> Immediate per-item revalidation -> Delete -> Verify`
+
+A plan includes exact individual targets, cleanup scope, operation/evidence/policy identity, expected package effects, and warnings. Preflight accounts for existence/type, current incoming references and protection, package companions, loaded/dirty/unsaved state, and write/source-control constraints. If safe handling cannot be established, block with structured reasons. Revalidate immediately before each item. Changed impact or evidence requires renewed review, not reuse of an earlier confirmation.
+
+Select an Unreal-supported deletion path only after checking its actual behavior on UE 5.5 and 5.8. Never bypass reference blockers, null references, or force-delete as a retry. Verify target absence and expected package state, report unexpected effects, and preserve unrelated content. API-reported failure and verification failure both imply possible partial mutation: stop, invalidate affected plans/results in both modes, and require rescan/review. Only pre-mutation rejection can be reported as not executed.
+
+Keep candidate disk size separate from eligible-plan estimates and observed execution results. Recompute totals after changes, avoiding duplicate package accounting. Do not promise disk savings or undo/rollback that have not been verified.
+
+### Implemented operation boundary (2026-10-28)
+
+Reviewed preflight objects bind the exact plan identity, current evidence and expected package impact. Orphan plans also retain exclusions and policy revision. The Editor session subsystem consumes operation IDs after a native call, even on failure, preventing plan replay. Registry/property changes and mutations invalidate both UI result modes and their confirmations. Deletion rejects missing reference-graph nodes, unready manager/registry state, unknown subclasses, external package state and unreviewed external payload sidecars. No query failure is interpreted as absence of use.
+
+Loaded reflected hard/soft properties are inspected without invoking arbitrary UObject serializers; the engine reference collector additionally checks hard/undo users. This remains bounded evidence alongside registered package/management relationships, with dynamic and non-reflected use disclosed as a limitation. Duplicate verification audits serialized destinations/counts in the affected packages.
+
+Redirector cleanup is narrower than a general fix-up: after verified consolidation, only zero-user single-object writable redirector packages are eligible, with source control disabled. Ordinary supported deletion avoids the modal AssetTools fix-up report and does not rewrite references or collections. It has independent review/confirmation, immediate revalidation and outcome checks.
+
+### Confirmed duplicate batches with shared reference packages
+
+The Editor consolidation service preflights the complete ordered batch. It identifies shared impact packages before confirmation and rejects overlapping member packages or dependencies between groups. Independent groups may share reference packages. Each review retains structured per-package file evidence and serialized owner/property/destination counts as well as its complete identity.
+
+Execution validates every pending review before each native submission. After a successful and verified group, a pending review may advance only if impact/outside-target membership is unchanged, file evidence outside the completed group's reviewed impact is unchanged, and the full reference audit equals the previous audit with exactly that group's source-to-canonical substitution (including merged counts). Only then may file save evidence for the already-reviewed written packages advance. A newly successful preflight alone never authorizes changed impact or references. The single-group evidence comparison remains in place.
+
+The first native submission makes the batch and all its original individual plans non-replayable at batch exit, including untouched plans after a stop. Native/verification failure stops immediately. Per-plan results include untouched items; the panel keeps their exact targets in the read-only outcome report and requires new scan/review after mutation. No mutation retains the queue for fresh preflight. This is a synchronous game-thread boundary, not a filesystem transaction or rollback guarantee.

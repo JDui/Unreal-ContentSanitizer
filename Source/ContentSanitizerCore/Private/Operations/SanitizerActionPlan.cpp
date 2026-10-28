@@ -1,4 +1,5 @@
 #include "Operations/SanitizerActionPlan.h"
+#include "Model/SanitizerOrphanTypes.h"
 
 namespace ContentSanitizerActionPlan
 {
@@ -39,6 +40,7 @@ namespace ContentSanitizerActionPlan
         }
         OutPlan = {};
         OutPlan.PlanId = Group.GroupId;
+        OutPlan.OperationId = FGuid::NewGuid().ToString();
         OutPlan.ProviderId = Group.ProviderId.ToString();
         OutPlan.SchemaVersion = CanonicalFingerprint.SchemaVersion;
         OutPlan.CanonicalAsset = FSoftObjectPath(Group.Members[Group.CanonicalMemberIndex].Record.GetObjectPath());
@@ -50,19 +52,13 @@ namespace ContentSanitizerActionPlan
 
 bool FSanitizerActionPlanner::CreatePlan(const FSanitizerDuplicateGroup& Group, uint64 ScanRevision, FSanitizerActionPlan& OutPlan, FString& OutError)
 {
-    if (!ContentSanitizerActionPlan::ValidateVerifiedGroup(Group, OutPlan, OutError)) { return false; }
-    OutPlan.ScanRevision = ScanRevision;
-    for (int32 Index = 0; Index < Group.Members.Num(); ++Index)
-    {
-        if (Index != Group.CanonicalMemberIndex) { OutPlan.SourceAssets.Add(FSoftObjectPath(Group.Members[Index].Record.GetObjectPath())); }
-    }
-    OutPlan.SourceAssets.Sort([](const FSoftObjectPath& Left, const FSoftObjectPath& Right) { return Left.ToString() < Right.ToString(); });
-    OutError.Reset();
-    return true;
+    return CreatePlanForScope(Group, ScanRevision, { FName(TEXT("/Game")) }, OutPlan, OutError);
 }
 
 bool FSanitizerActionPlanner::CreatePlanForScope(const FSanitizerDuplicateGroup& Group, uint64 ScanRevision, const TArray<FName>& CleanupPackagePaths, FSanitizerActionPlan& OutPlan, FString& OutError)
 {
+    OutPlan = {};
+    OutError.Reset();
     if (CleanupPackagePaths.IsEmpty())
     {
         OutError = TEXT("整理范围为空，拒绝生成修改计划。");
@@ -70,6 +66,7 @@ bool FSanitizerActionPlanner::CreatePlanForScope(const FSanitizerDuplicateGroup&
     }
     if (!ContentSanitizerActionPlan::ValidateVerifiedGroup(Group, OutPlan, OutError)) { return false; }
     OutPlan.ScanRevision = ScanRevision;
+    OutPlan.CleanupPackagePaths = CleanupPackagePaths;
     for (int32 Index = 0; Index < Group.Members.Num(); ++Index)
     {
         if (Index == Group.CanonicalMemberIndex) { continue; }
@@ -93,16 +90,63 @@ bool FSanitizerActionPlanner::CreatePlanForScope(const FSanitizerDuplicateGroup&
 FSanitizerPreflightResult FSanitizerActionPlanner::ValidateShape(const FSanitizerActionPlan& Plan)
 {
     FSanitizerPreflightResult Result;
+    if (Plan.OperationId.IsEmpty() || Plan.PlanId.IsEmpty() || !Plan.ScanRevision || Plan.CleanupPackagePaths.IsEmpty()) { Result.Messages.Add(TEXT("整理计划缺少操作、扫描身份或清理范围。")); }
     if (!Plan.CanonicalAsset.IsValid()) { Result.Messages.Add(TEXT("整理计划缺少有效的主资产。")); }
     if (Plan.SourceAssets.IsEmpty()) { Result.Messages.Add(TEXT("整理计划中没有待整理资产。")); }
     TSet<FSoftObjectPath> UniqueSources;
     for (const FSoftObjectPath& Source : Plan.SourceAssets)
     {
         if (!Source.IsValid()) { Result.Messages.Add(TEXT("整理计划包含无效的待整理资产。")); }
+        if (!Source.GetSubPathString().IsEmpty() || !SanitizerOrphanPolicy::IsInScope(Source.GetLongPackageName(), Plan.CleanupPackagePaths)
+            || !SanitizerOrphanPolicy::IsInScope(Source.GetLongPackageName(), { FName(TEXT("/Game")) })
+            || SanitizerOrphanPolicy::IsInScope(Source.GetLongPackageName(), { FName(TEXT("/Game/Developers")) })) { Result.Messages.Add(TEXT("整理来源超出清理范围或属于受保护内容。")); }
         if (Source == Plan.CanonicalAsset) { Result.Messages.Add(TEXT("主资产不能同时作为待整理资产。")); }
         if (UniqueSources.Contains(Source)) { Result.Messages.Add(TEXT("整理计划包含重复的待整理资产。")); }
         UniqueSources.Add(Source);
     }
     Result.Status = Result.Messages.IsEmpty() ? ESanitizerPreflightStatus::Ready : ESanitizerPreflightStatus::Blocked;
     return Result;
+}
+
+FString FSanitizerActionPlan::GetIdentity() const
+{
+    FString Identity = FString::Printf(TEXT("%s|%s|%u|%llu|%s|%s|%s|"), *PlanId, *ProviderId, SchemaVersion, ScanRevision, *CanonicalAsset.ToString(), *LexToString(PayloadHash), *LexToString(SettingsHash));
+    for (FName Root : CleanupPackagePaths) { Identity += Root.ToString() + TEXT("|"); }
+    for (const FSoftObjectPath& Source : SourceAssets) { Identity += Source.ToString() + TEXT("|"); }
+    return OperationId + TEXT("|") + Identity;
+}
+
+int32 FSanitizerActionPlanner::RecommendCanonical(const FSanitizerDuplicateGroup& Group, const TArray<FName>& CleanupPackagePaths)
+{
+    int32 Best = INDEX_NONE;
+    for (int32 Index = 0; Index < Group.Members.Num(); ++Index)
+    {
+        if (Best == INDEX_NONE) { Best = Index; continue; }
+        const auto& A = Group.Members[Index].Record;
+        const auto& B = Group.Members[Best].Record;
+        const bool AOutside = !SanitizerOrphanPolicy::IsInScope(A.PackageName.ToString(), CleanupPackagePaths);
+        const bool BOutside = !SanitizerOrphanPolicy::IsInScope(B.PackageName.ToString(), CleanupPackagePaths);
+        const int32 ARefs = A.HardReferenceCount + A.SoftReferenceCount;
+        const int32 BRefs = B.HardReferenceCount + B.SoftReferenceCount;
+        const FString APath = A.GetObjectPath(), BPath = B.GetObjectPath();
+        if (AOutside != BOutside ? AOutside : (ARefs != BRefs ? ARefs > BRefs : (APath.Len() != BPath.Len() ? APath.Len() < BPath.Len() : APath < BPath))) { Best = Index; }
+    }
+    return Best;
+}
+
+int64 FSanitizerActionPlanner::EstimateSourceBytes(const FSanitizerDuplicateGroup& Group, const TArray<FName>& Roots)
+{
+    if (Group.Classification != ESanitizerClassification::SafeDuplicate || !Group.Members.IsValidIndex(Group.CanonicalMemberIndex)) { return 0; }
+    int64 Bytes = 0;
+    TSet<FName> Packages;
+    for (int32 Index = 0; Index < Group.Members.Num(); ++Index)
+    {
+        const auto& Record = Group.Members[Index].Record;
+        if (Index != Group.CanonicalMemberIndex && SanitizerOrphanPolicy::IsInScope(Record.PackageName.ToString(), Roots) && !Packages.Contains(Record.PackageName))
+        {
+            Packages.Add(Record.PackageName);
+            Bytes += FMath::Max<int64>(0, Record.EstimatedDiskSize);
+        }
+    }
+    return Bytes;
 }

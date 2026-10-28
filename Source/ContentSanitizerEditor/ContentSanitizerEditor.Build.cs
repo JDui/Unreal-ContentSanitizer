@@ -6,6 +6,6 @@ public class ContentSanitizerEditor : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new[] { "ContentSanitizerCore", "Core", "CoreUObject", "Engine", "Slate", "SlateCore", "InputCore" });
-        PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "ToolMenus", "ContentBrowser", "AssetRegistry", "AssetTools", "Projects", "MessageLog" });
+        PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "ToolMenus", "ContentBrowser", "AssetRegistry", "Projects", "MessageLog", "SourceControl", "EditorSubsystem" });
     }
 }

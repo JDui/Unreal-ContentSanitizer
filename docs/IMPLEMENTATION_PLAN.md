@@ -1,317 +1,120 @@
-# Implementation Plan
+# Active Stage Implementation Plan
 
-This plan defines the intended delivery sequence for Unreal Content Sanitizer. Agents should prefer completing a milestone vertically and with tests instead of spreading partial implementation across later features.
+Stage definition confirmed by the user on **2026-10-28**. `../AGENTS.md` is authoritative. This plan replaces the earlier v0.1-only sequence; it does not change the plugin version or declare a release.
 
-## Milestone 0 - Plugin skeleton
+## 1. Confirmed scope
 
-Goal: load a clean UE 5.8 Editor plugin with stable module boundaries.
+Deliver two complete workflows on **UE 5.5 and UE 5.8**:
 
-Deliverables:
+- Exact `Texture2D` duplicate review, canonical selection, scoped consolidation, and verification.
+- Single-asset orphan inspection for textures, materials/material instances, static meshes, and skeletal meshes, followed by a deletion queue, preflight, confirmation, revalidation, and verification.
 
-- `ContentSanitizer.uplugin`.
-- `ContentSanitizerCore` module.
-- `ContentSanitizerEditor` module.
-- dedicated log category.
-- dockable Content Sanitizer tab.
-- menu/command registration.
-- Content Browser context action placeholders.
-- minimal test host project.
-- first automation test proving the plugin/test suite is discoverable.
+Material bindings are display/filter metadata, not a mesh-use criterion. Duplicate sources stay inside the cleanup target; comparison defaults to `/Game`; prefer external equivalent canonicals and support manual override. Show and confirm every affected package, including references outside the target.
 
-Acceptance:
+No cluster/reachability analysis, additional duplicate types, quarantine/moves, or automatic dependency cleanup is included.
 
-- Editor target compiles.
-- Plugin loads without ensure/assert.
-- Tab can be opened/closed repeatedly.
-- `ContentSanitizer.*` automation test is visible and runnable.
+## 2. Observed baseline, not acceptance evidence
 
-## Milestone 1 - Asset inventory
+Source review on 2026-10-28 found the following. No build, automation, or live-editor acceptance was performed as part of this definition.
 
-Goal: scalable read-only scope enumeration.
+| Area | Observed implementation | Remaining stage work |
+|---|---|---|
+| Duplicate scan | Texture2D provider, payload/settings comparison, incremental scan, persistent cache, scope filtering | Validate behavior and failures on both engines |
+| Consolidation | Plan, fresh fingerprint preflight, native API, post-operation checks | Service-enforced scope/impact; affected-package review; reference-destination verification |
+| Canonical choice | Automatic recommendation, including external-target preference in UI | Manual override and testable non-widget scope/recommendation policy |
+| Orphan scan | Uncommitted implementation for four asset families; package hard/soft referencer queries | Evidence coverage/protections, honest candidate labels, material-independent mesh policy |
+| Orphan cancellation | Request changes state to CancelRequested, but TickScan accepts only Analyzing | Repair terminal-state transition and pass cancellation regression |
+| Orphan deletion | Selected-row confirmation followed by DeleteAsset in widget | Separate plan/preflight/execution/verification service; no direct destructive row shortcut |
+| Orphan clusters | Enum/text exists | Not implemented and explicitly excluded; do not advertise this capability |
+| Redirectors | Described in documentation | Separate optional action after verified consolidation; no implicit cleanup |
+| Automation tooling | Build script accepts 5.5/5.8; test script accepts only 5.8 | Add and validate a genuine 5.5 automation lane; isolate engine artifacts |
 
-Deliverables:
+Preserve pre-existing source changes. Their presence does not authorize bypassing this contract or prove that tests pass.
 
-- scan scope model;
-- default `/Game` scope;
-- selected folder/assets/custom path scopes;
-- exclusion policy;
-- Asset Registry inventory service;
-- lightweight asset record model;
-- deterministic ordering;
-- scan progress/session state;
-- cancellation;
-- basic summary counts.
+## 3. Milestone A: safety models and scan foundations
 
-Tests:
+Deliver:
 
-- default scope behavior;
-- exclusions;
-- cancellation terminal state;
-- deterministic ordering;
-- unsupported assets do not cause loading/mutation.
+- operation-specific plans carrying cleanup scope, evidence revision, and expected impact;
+- structured candidate/review/blocked states distinct from action readiness;
+- cross-mode invalidation after scope changes, asset changes, and mutations;
+- consistent cancellation and failure terminal states;
+- reference-evidence and protection checks independent of Slate;
+- no direct orphan deletion route until the reviewed service workflow is available.
 
 Acceptance:
 
-- project content can be inventoried without eagerly loading all assets;
-- cancel leaves editor/project state unchanged.
+- scan/review/preflight leave project content unchanged;
+- reference discovery includes users outside selected folders and asset families;
+- no references observed is never presented as absolute non-use proof;
+- known references, failed required checks, or protected targets cannot be overridden by confirmation;
+- canceled/partial scans cannot authorize mutations;
+- adding/removing material bindings alone does not change orphan classification.
 
-## Milestone 2 - Texture2D exact dedup core
+## 4. Milestone B: complete duplicate review and execution
 
-Goal: detect exact semantic Texture2D duplicates safely.
+Deliver:
 
-Deliverables:
-
-- fingerprint provider interface;
-- Texture2D provider;
-- cheap fingerprint/bucket key;
-- immutable source snapshot extraction;
-- `FIoHashBuilder` payload fingerprint;
-- behavior/settings fingerprint;
-- provider/schema version;
-- duplicate grouping;
-- `SafeDuplicate` vs `ReviewRequired` classification;
-- reclaimable-size estimate method.
-
-Required behavior:
-
-```text
-same source + same settings -> SafeDuplicate
-same source + different behavior setting -> ReviewRequired
-different source -> not exact duplicate
-```
-
-Tests:
-
-- texture provider classification matrix;
-- pixel/source differences;
-- sRGB difference;
-- compression difference;
-- renamed/path-moved equivalent textures;
-- deterministic fingerprinting/grouping.
+- manual canonical selection among proven equivalent members;
+- deterministic external-target preference with explainable recommendation;
+- cleanup-source scope enforcement in plan/execution services;
+- inspectable affected-package list, including out-of-target referencers;
+- fresh equivalence and impact checks, with renewed review when impact changes;
+- native consolidation and reference-destination verification;
+- independent optional redirector cleanup after successful verification.
 
 Acceptance:
 
-- no destructive code is required yet;
-- results are explainable from structured comparison data.
+- equivalent assets outside the target can be retained but never silently become sources;
+- same-payload/different-settings groups remain review-only;
+- manual canonical edits invalidate preflight and confirmation;
+- stale evidence or expanded impact cannot execute under an old confirmation;
+- partial/API/verification failure stops the queue without force-delete fallback or automatic retry.
 
-## Milestone 3 - Review GUI
+## 5. Milestone C: single-asset orphan deletion workflow
 
-Goal: make scan results usable at scale.
+Deliver:
 
-Deliverables:
-
-- toolbar and scope selector;
-- scan/cancel controls;
-- summary strip;
-- left filters;
-- virtualized duplicate group tree/list;
-- asset rows;
-- status text/icons;
-- inspector;
-- side-by-side relevant settings diff;
-- canonical recommendation display;
-- manual canonical override;
-- Content Browser navigation/show-in-browser action.
-
-Tests:
-
-- filter/view-model behavior;
-- sorting;
-- action eligibility mapping;
-- summary calculations;
-- canonical override state.
+- per-type inventory with explicit unsupported-state handling;
+- incoming-reference evidence separate from outgoing dependency/material metadata;
+- registry/protection/management checks and visible dynamic-use coverage limitations;
+- exact deletion-target queue, per-item blockers/warnings, and expected package effects;
+- revalidation immediately before each item using current references and editor state;
+- reviewed Unreal-supported deletion API behavior on both engines;
+- post-deletion verification and cross-mode invalidation/reporting.
 
 Acceptance:
 
-- user can identify why a group is Safe or Review Required without consulting Output Log;
-- UI remains responsive with large synthetic result sets.
+- known hard/soft/management users block deletion;
+- dirty/unsaved/loaded/package-companion uncertainty cannot silently pass preflight;
+- only explicitly queued eligible individual assets are deleted;
+- referenced dependencies and newly exposed candidates are never automatically queued or deleted;
+- zero registered references remains a bounded observation, with residual limitations disclosed at confirmation;
+- mutation failures report possible partial change and require rescan/review;
+- candidate size and executable-plan size are separate estimates.
 
-## Milestone 4 - Action plan, preflight, consolidation
+## 6. Milestone D: dual-engine acceptance and documentation
 
-Goal: safely perform real cleanup.
+For each of **UE 5.5 / Win64 Editor** and **UE 5.8 / Win64 Editor**:
 
-Deliverables:
+1. Build both plugin modules and a disposable automation host.
+2. Run the full `ContentSanitizer` suite, including both mutation workflows and failure paths.
+3. Inspect failures, warnings, ensures/asserts, and generated fixture/cache cleanup.
+4. Exercise tab/context-menu scope, scan/cancel, filters, inspector, manual canonical override, queue/preflight/confirmation, result invalidation, and outcomes in the editor.
+5. Record engine version, command/configuration, results, and unvalidated behavior. Headless automation does not establish GUI acceptance.
 
-- action queue;
-- immutable/versioned action-plan model;
-- dry-run/preflight service;
-- staleness revalidation;
-- source-control/writeability checks where applicable;
-- `UEditorAssetSubsystem::ConsolidateAssets` integration;
-- structured operation results;
-- post-operation verification;
-- Message Log/notification reporting;
-- optional redirector cleanup after verification.
+The test entry point now supports isolated lanes for both engines; actual results and remaining limitations are tracked in `VALIDATION_2026-10-28.md`. An unavailable or failed lane remains unvalidated and blocks stage release acceptance.
 
-Tests:
+## 7. Stage completion
 
-- generated disposable consolidation fixture;
-- reference replacement;
-- unrelated reference preservation;
-- missing canonical/source preflight rejection;
-- changed fingerprint rejection;
-- invalid source-list rejection;
-- failure never falls back to force delete;
-- test fixture cleanup.
+All milestones must meet `AGENTS.md`, `ARCHITECTURE.md`, `GUI_GUIDELINES.md`, and `TESTING.md`. README must describe delivered behavior and limitations, not merely plans. Do not commit generated assets, binaries, IDE state, or local engine paths. A documentation-only stage-definition change requires consistency/link/diff checks, not an engine build or version bump.
 
-Acceptance:
+## 8. Implementation follow-through (2026-10-28)
 
-- no source asset is modified during scan/review/preflight;
-- blocked preflight performs no mutation;
-- successful consolidation is verified and clearly reported.
+The baseline table above remains historical. Follow-through now includes orphan terminal cancellation/failure states, candidate/blocker evidence, material-independent mesh classification, exact deletion plans and Editor service, ordinary deletion with immediate revalidation and outcome checks, consumed-plan replay prevention, and cross-mode invalidation. Duplicate planning now carries service-enforced source scope, deterministic external canonical preference/manual override, affected/out-of-target packages, fresh deep equivalence and reference-destination counts. Independent conservative redirector cleanup has its own plan/preflight/confirmation. The Slate panel exposes custom target input, filters, inspector, editable queues and separate execution controls.
 
-## v0.1.0 release boundary
+Generated tests and isolated dual-engine tooling accompany these changes. These entries describe implementation, not stage acceptance. Read `VALIDATION_2026-10-28.md` before treating either engine lane, the full matrix, or direct editor interactions as verified.
 
-v0.1.0 is complete after Milestone 4.
+### Shared-package batch correction
 
-Included:
-
-- UE 5.8 Editor plugin;
-- Texture2D exact duplicate scanning;
-- payload/settings distinction;
-- Safe vs Review classification;
-- canonical selection;
-- review/diff GUI;
-- action queue;
-- dry-run/preflight;
-- safe consolidation;
-- verification;
-- optional redirector cleanup;
-- automated regression suite.
-
-Explicitly excluded:
-
-- perceptual image similarity for automatic cleanup;
-- Blueprint equivalence;
-- SkeletalMesh equivalence;
-- broad unused-asset deletion;
-- custom reference-rewrite engine;
-- Python/UMG frontend.
-
-## Milestone 5 - Cache and additional low-risk providers
-
-Candidates:
-
-- fingerprint cache;
-- TextureCube;
-- MaterialInstance;
-- SoundWave.
-
-Cache requirements:
-
-- schema-aware invalidation;
-- package/source change invalidation;
-- corruption/miss falls back to recomputation;
-- cache does not change correctness semantics.
-
-Each new provider must define:
-
-- cheap fingerprint;
-- payload domain;
-- settings/behavior domain;
-- schema version;
-- Safe/Review rules;
-- provider regression matrix.
-
-## Milestone 6 - StaticMesh
-
-Do not implement until equivalence semantics are documented.
-
-Expected dimensions include:
-
-- geometry/index data;
-- LODs;
-- sections/material slot semantics;
-- build settings;
-- normals/tangents;
-- UVs;
-- Nanite-related behavior where relevant;
-- collision-related behavior where relevant.
-
-A mesh that only looks identical is not automatically a SafeDuplicate.
-
-## Milestone 7 - SkeletalMesh research/prototype
-
-This is deliberately late because equivalence is high risk.
-
-Potential dimensions include:
-
-- geometry/LODs;
-- skeleton/bone mapping;
-- skin weights;
-- morph targets;
-- material slots;
-- clothing;
-- build settings;
-- Nanite/skinning features;
-- physics/skeleton references.
-
-No automatic destructive path should ship before an explicit equivalence specification and comprehensive tests exist.
-
-## Future sanitizer families
-
-After duplicate cleanup is stable, the product may grow into additional independent sanitizer rules:
-
-- redirector inventory/cleanup;
-- unused asset candidates;
-- broken reference checks;
-- oversized asset reports;
-- source-file missing checks;
-- naming/path policy checks.
-
-These features should reuse scan/session/result infrastructure where appropriate without forcing unrelated rules into the duplicate fingerprint provider abstraction.
-
-## Suggested repository layout
-
-```text
-Unreal-ContentSanitizer/
-├─ AGENTS.md
-├─ ContentSanitizer.uplugin
-├─ Source/
-│  ├─ ContentSanitizerCore/
-│  │  ├─ ContentSanitizerCore.Build.cs
-│  │  ├─ Public/
-│  │  │  ├─ Model/
-│  │  │  ├─ Scanner/
-│  │  │  ├─ Providers/
-│  │  │  └─ Operations/
-│  │  └─ Private/
-│  │     └─ Tests/
-│  └─ ContentSanitizerEditor/
-│     ├─ ContentSanitizerEditor.Build.cs
-│     ├─ Public/
-│     └─ Private/
-│        ├─ UI/
-│        ├─ Operations/
-│        └─ Tests/
-├─ Tests/
-│  └─ ContentSanitizerTestHost/
-├─ Resources/
-└─ docs/
-   ├─ ARCHITECTURE.md
-   ├─ GUI_GUIDELINES.md
-   ├─ IMPLEMENTATION_PLAN.md
-   ├─ TECH_STACK.md
-   └─ TESTING.md
-```
-
-Directory names under modules may be refined when code appears, but maintain the Core/Editor and domain/UI separation.
-
-## Per-task agent checklist
-
-For every implementation task:
-
-1. State the milestone/subsystem affected.
-2. Read the relevant architecture/test/GUI rules.
-3. Add or update tests before declaring completion.
-4. Keep mutation separate from scan logic.
-5. Build affected modules.
-6. Run relevant `ContentSanitizer` tests.
-7. Review failures, ensures, and cleanup state.
-8. Update docs if behavior or contract changed.
-
-## First coding task recommendation
-
-Start with Milestone 0 only.
-
-Do not implement the Texture2D hashing algorithm in the same initial commit as plugin/module/tab/test-host scaffolding. Establish a compileable/testable baseline first, then add inventory and fingerprint behavior in independently reviewable steps.
+Independent duplicate groups now use complete-batch preflight and exact intermediate evidence transitions. Shared impact is presented before the single confirmation; overlapping member packages and inter-group dependencies are rejected. Only verified planned substitutions and saves of already-reviewed packages advance pending evidence. Unexpected changes stop the batch, retain untouched-item outcome details, and invalidate all original executable plans. This corrects the independently reproduced stop-after-first-group defect; the original 33-test snapshots did not cover it. See the batch follow-up in `VALIDATION_2026-10-28.md` for new results.

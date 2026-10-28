@@ -4,6 +4,8 @@ This document defines the automated-test contract for Unreal Content Sanitizer.
 
 The project handles destructive editor operations. Tests are therefore a product requirement, not optional cleanup work.
 
+The active stage requires duplicate consolidation and single-asset orphan cleanup on **UE 5.5 and UE 5.8**. Sections below retain duplicate coverage; section 16 adds required orphan/scope regression coverage. This specification lists required tests, not a claim that they all exist or pass.
+
 ## 1. Test framework
 
 Use Unreal Engine's native Automation Framework.
@@ -103,7 +105,7 @@ Required assertions:
 
 ### 2.5 GUI/model tests
 
-Do not make screenshot tests the primary GUI test strategy for v0.1.
+Do not make screenshot tests the primary GUI test strategy.
 
 Test UI behavior through separable view models/domain models where possible:
 
@@ -223,7 +225,7 @@ UnrealEditor-Cmd.exe ^
 
 The exact engine executable path is machine-specific and must not be committed as an absolute local path.
 
-If a test genuinely requires rendering, do not use `-NullRHI` for that test lane. v0.1 core/provider/consolidation tests should be designed to avoid a rendering requirement.
+If a test genuinely requires rendering, do not use `-NullRHI` for that test lane. Core/provider/consolidation/orphan-deletion tests should be designed to avoid a rendering requirement.
 
 ## 9. Required CI/test lanes
 
@@ -235,11 +237,11 @@ When CI is added, use at least these conceptual lanes:
 - run `ContentSanitizer.Unit`;
 - run fast provider tests.
 
-### Full editor gate
+### Full editor gate (both UE 5.5 and UE 5.8)
 
 - build editor target;
 - run all `ContentSanitizer` automation tests;
-- include Asset Registry/provider/consolidation integration tests;
+- include Asset Registry/provider/consolidation/orphan-deletion integration tests;
 - verify process exit status and automation failures.
 
 Do not require GitHub-hosted runners to magically contain Unreal Engine. CI implementation must use an explicitly provisioned/self-hosted environment or another legally/technically valid engine installation strategy.
@@ -341,3 +343,76 @@ Before a change affecting scanner, provider, classification, or mutation code is
 4. no generated fixture packages remain;
 5. logs contain no unexplained ensure/assert/automation errors;
 6. documentation and fingerprint schema decisions are consistent with implementation.
+
+Both engine lanes are mandatory for implementation acceptance; full stage release acceptance additionally requires all `ContentSanitizer` tests and editor workflow checks on each engine. Record missing environments as unvalidated. Documentation-only work uses diff, consistency, and link checks without builds or fixture mutation.
+
+## 16. Active-stage regression matrix
+
+### Scope and duplicate workflow
+
+- A folder context action sets target only; no automatic scan/mutation.
+- Duplicate comparison defaults to `/Game`, with sources restricted to target folders even when the service is invoked without a widget.
+- External equivalent canonicals are preferred deterministically; manual override retains equivalence/source-scope restrictions.
+- Scope, canonical, target, evidence, and impact changes invalidate prior preflight/confirmation.
+- Referencers outside cleanup folders appear in impact; new referencers between review and execution require renewed review when they expand impact.
+- Known references resolve to the retained canonical after consolidation, not merely away from the removed source; unrelated references remain intact.
+- Redirector cleanup occurs only as an independent explicit operation after successful consolidation verification.
+
+### Orphan evidence and eligibility
+
+Use generated fixtures for every advertised asset family and representative supported subclasses/states. Cover:
+
+| Fixture/condition | Required outcome |
+|---|---|
+| No observed external references | Candidate with explicit coverage; not an unconditional safety claim |
+| External hard reference | Not deletion-eligible |
+| External soft reference, zero hard references | Not deletion-eligible |
+| Applicable management reference/protection | Block deletion |
+| Referencer outside selected folders or supported candidate classes | Still detected and blocks deletion |
+| Unready registry, failed required inspection, unsupported asset state | Unknown/blocked with a reason, never inferred unused |
+| Dirty/unsaved state, loaded user, or package companion | Safely accounted for or blocked; no ignored relevant state |
+| Project/default/engine/empty material slots on an otherwise identical mesh | Same orphan evidence classification; metadata/filter values may differ |
+| Material metadata extraction failure | Unknown metadata, never proof of non-use |
+| Mesh points to material | Outgoing dependency is not treated as an incoming mesh user |
+| Internally referenced chain/cycle | No cluster deletion or recursive queue expansion |
+| Dynamic path use not covered by registry | Coverage limitation remains visible through review and confirmation; no claim of exhaustive detection |
+
+Also cover exclusions/protected roots, scope changes, deterministic ordering, cancellation before start and during processing, explicit canceled/failed terminal states, and prohibition on mutation from partial results. These checks must verify behavior, not merely enum labels or text.
+
+### Orphan planning, preflight, execution, and verification
+
+Required negative tests include empty/duplicate/invalid/out-of-target targets; changed type/policy/revision; missing assets; new hard/soft/management references after scan and after preflight; newly dirty/protected/read-only state; canceled confirmation; and impact expansion.
+
+Assert preflight is read-only, blockers perform no deletion, scope is enforced without Slate, and immediate per-item revalidation rejects stale state. Review the chosen engine deletion API on both supported versions; a true return value alone is not a verification test.
+
+Generate a fixture containing an unreferenced target, a dependency it points to, a protected or referenced asset, and unrelated content. After a valid individual deletion, verify target absence, expected package state, dependency survival, unrelated content/reference preservation, and that no newly exposed candidate is automatically deleted. Verify package-level effects and reject multi-object cases that cannot be handled safely.
+
+Exercise API failure/possible partial mutation and verification failure through a controllable test seam where needed. Verify queue stop, accurate status, no fallback/automatic retry, cross-mode invalidation, and summary recalculation. Tests must not depend on provoking destructive failures in production content.
+
+All tests must clean generated packages and temporary cache files, including failure paths, and explicitly report cleanup failures. Candidate and plan size estimates must avoid duplicate package accounting and never claim actual reclaimed bytes before verification.
+
+## 17. Engine-lane tooling status
+
+`Scripts/Build-Plugin.ps1` and `Scripts/Test-Plugin.ps1` accept 5.5 and 5.8. Test runs use unique temporary plugin copies and a dedicated C++ host Editor target, rather than the catch-all UnrealEditor target. Engine writes are prohibited. Build/test processes run serially, hidden, at reduced priority, with at most two compile actions. Reports, commands and fixture/host cleanup records are retained under `Saved/Validation`; real lane outcomes are recorded in `VALIDATION_2026-10-28.md`. A passing entry point does not establish both lanes or GUI acceptance.
+
+### Native deletion acceptance fixtures
+
+The deletion integration suite invokes the ordinary `ObjectTools::DeleteObjects` path on generated hard- and soft-referenced targets, asserting zero deletions, preserved references, and surviving packages. Positive service fixtures assert exact target/package absence and dependency/unrelated survival. Controllable service seams report native failure or false success to prove queue stop, possible-modification status, verification failure, and replay rejection without provoking destructive production failures.
+
+The 5.5 source review establishes that `UEditorAssetSubsystem::DeleteAsset` calls `ForceDeleteObjects`, so it is prohibited in the product deletion path. `ObjectTools::DeleteObjects(..., false, CancelNotAllowed)` uses its ordinary delete model; the model refuses users before `DoDelete`. Source review is supplemented by fixtures on each engine; do not infer 5.8 acceptance solely from a header or the 5.5 source. Fixture-only teardown can use engine force cleanup on the unique disposable test root.
+
+Fixture saves synchronously scan only their disposable root before registry assertions, avoiding races with directory-watcher delivery. Unregistered/missing dependency nodes are a blocking inspection failure. Provider regression includes sRGB/compression/address/filter settings and name/metadata/dimension behavior. An unattached Slate fixture checks scope-without-scan, explicit queues, canonical/preflight invalidation and cross-mode summary reset. Consolidation seams simulate reported failure and false success, assert replay rejection and require a fresh scan/plan before the real fixture operation.
+
+External payload sidecars are excluded until a complete package-file policy can be verified. A disposable sidecar regression proves preflight blocks rather than claiming complete cleanup from main-package disappearance alone.
+
+The final family fixture performs actual ordinary deletion of generated Texture2D, Material, MaterialInstanceConstant, StaticMesh and SkeletalMesh targets, verifies every target and package absent, and retains shared material/texture dependencies. Class enumeration and metadata tests alone are not used as deletion acceptance.
+
+### Shared-reference duplicate batch regression
+
+`ContentSanitizer.Integration.Consolidation.Batch` creates two independent texture pairs used by one generated asset's hard and soft properties. One reviewed confirmation must complete both native consolidations with exact destinations, preserved existing canonical references, and no additional impact. Preflight explicitly lists the shared outside-target package.
+
+Negative cases add or change saved users before execution and during the first native submission, change a shared property's destination unexpectedly, alter only file evidence of a package outside the completed group's impact, reorder an already-reviewed batch, simulate reported failure on the second of three groups, simulate false success, and submit overlapping members. They assert no later native calls, exact per-plan untouched results, source survival, stop on unexpected audit/impact, and rejection of both batch replay and all old individual plans after any native submission. Cleanup operates only on a generated GUID fixture root. Existing single-group stale-evidence tests remain mandatory.
+
+The unattached Slate test also presents a synthetic partial-batch result without invoking mutation: it asserts exact untouched-target reporting after executable-plan invalidation, and preservation of queued targets with cleared confirmation when no native call occurred.
+
+Batch fixture teardown has its own ownership guard for the generated GUID root. After behavior assertions, it clears/saves generated reference-asset edges, waits for async package writes, and force-removes only fixture objects. The installed 5.8 bulk directory helper reports object removal yet leaves some package files, even after clearing edges/waiting. Fixture-only cleanup therefore inventories exact package filenames within the generated root, resets their loaders, removes any retained files, then independently asserts empty disk and registry state. The root must parse as a generated GUID and resolve inside project Content; the host script independently checks all fixture files before removing its owned host. No production teardown fallback is added.

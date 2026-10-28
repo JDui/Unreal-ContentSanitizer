@@ -13,4 +13,10 @@ class UContentSanitizerTestReferenceAsset final : public UDataAsset
 public:
     UPROPERTY()
     TObjectPtr<UTexture2D> Texture;
+
+    UPROPERTY()
+    TSoftObjectPtr<UObject> SoftAsset;
+
+    UPROPERTY()
+    TObjectPtr<UObject> OtherAsset;
 };

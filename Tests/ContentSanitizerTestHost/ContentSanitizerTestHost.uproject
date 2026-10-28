@@ -3,7 +3,13 @@
   "EngineAssociation": "5.8",
   "Category": "Tests",
   "Description": "Disposable automation-test host for Content Sanitizer.",
+  "DisableEnginePluginsByDefault": true,
+  "Modules": [
+    { "Name": "ContentSanitizerTestHost", "Type": "Runtime", "LoadingPhase": "Default" }
+  ],
   "Plugins": [
-    { "Name": "ContentSanitizer", "Enabled": true }
+    { "Name": "ContentSanitizer", "Enabled": true },
+    { "Name": "ContentBrowserAssetDataSource", "Enabled": true },
+    { "Name": "EngineAssetDefinitions", "Enabled": true }
   ]
 }

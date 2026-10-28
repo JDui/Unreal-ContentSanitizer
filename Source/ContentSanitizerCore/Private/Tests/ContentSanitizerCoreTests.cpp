@@ -8,6 +8,8 @@
 #include "Operations/SanitizerActionPlan.h"
 #include "Providers/Texture2DFingerprintProvider.h"
 #include "Scanner/SanitizerScanService.h"
+#include "Model/SanitizerOrphanTypes.h"
+#include "Scanner/SanitizerOrphanScanService.h"
 
 namespace ContentSanitizerTests
 {
@@ -227,6 +229,44 @@ bool FContentSanitizerFingerprintCacheRoundTripTest::RunTest(const FString& Para
     TestNull(TEXT("Changed package identity invalidates the cache entry"), Reloaded.FindValid(Entry.ObjectPath, Entry.ProviderId, Entry.Fingerprint.SchemaVersion, TEXT("PackageSavedHash:changed")));
     TestNull(TEXT("Changed provider invalidates the cache entry"), Reloaded.FindValid(Entry.ObjectPath, TEXT("OtherProvider"), Entry.Fingerprint.SchemaVersion, Entry.ChangeIdentity));
     TestNull(TEXT("Changed schema invalidates the cache entry"), Reloaded.FindValid(Entry.ObjectPath, Entry.ProviderId, Entry.Fingerprint.SchemaVersion + 1, Entry.ChangeIdentity));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentSanitizerOrphanTypesContractTest, "ContentSanitizer.Unit.Orphan.TypesAndTextContract", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FContentSanitizerOrphanTypesContractTest::RunTest(const FString& Parameters)
+{
+    TestEqual(TEXT("Texture type text"), SanitizerOrphanAssetTypeToText(ESanitizerOrphanAssetType::Texture), TEXT("贴图"));
+    TestEqual(TEXT("Material type text"), SanitizerOrphanAssetTypeToText(ESanitizerOrphanAssetType::Material), TEXT("材质"));
+    TestEqual(TEXT("StaticMesh type text"), SanitizerOrphanAssetTypeToText(ESanitizerOrphanAssetType::StaticMesh), TEXT("静态网格体"));
+    TestEqual(TEXT("SkeletalMesh type text"), SanitizerOrphanAssetTypeToText(ESanitizerOrphanAssetType::SkeletalMesh), TEXT("骨骼网格体"));
+
+    TestEqual(TEXT("Candidate classification text"), SanitizerOrphanClassificationToText(ESanitizerOrphanClassification::Candidate), TEXT("未发现外部引用（候选）"));
+    TestEqual(TEXT("ReviewRequired classification text"), SanitizerOrphanClassificationToText(ESanitizerOrphanClassification::ReviewRequired), TEXT("需要复核"));
+    TestEqual(TEXT("Blocked classification text"), SanitizerOrphanClassificationToText(ESanitizerOrphanClassification::Blocked), TEXT("已阻止"));
+
+    FSanitizerOrphanScanProgress Progress;
+    Progress.TotalAssets = 100;
+    Progress.ProcessedAssets = 25;
+    TestEqual(TEXT("Progress fraction is 0.25"), Progress.GetFraction(), 0.25f);
+    Progress.TotalAssets = 0;
+    TestEqual(TEXT("Zero total assets gives 0.0 fraction"), Progress.GetFraction(), 0.0f);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentSanitizerOrphanScanCancellationTest, "ContentSanitizer.Unit.Orphan.ScanCancellation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FContentSanitizerOrphanScanCancellationTest::RunTest(const FString& Parameters)
+{
+    FSanitizerOrphanScanService Service;
+    FSanitizerOrphanScanRequest Request;
+    Request.PackagePaths = { FName(TEXT("/Engine/EngineMaterials")) };
+
+    Service.BeginScan(Request);
+    TestTrue(TEXT("Scan is active after begin"), Service.IsScanActive());
+    Service.RequestCancel();
+    Service.TickScan(0.0, 100);
+    TestFalse(TEXT("Scan is not active after cancellation"), Service.IsScanActive());
+    TestTrue(TEXT("Scan result marked as canceled"), Service.GetResult().bCanceled);
     return true;
 }
 #endif

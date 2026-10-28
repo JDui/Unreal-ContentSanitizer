@@ -2,6 +2,8 @@
 
 This document defines the UI/UX contract for Unreal Content Sanitizer. Coding agents must preserve these rules unless a task explicitly changes the product design.
 
+The active stage includes duplicate consolidation and single-asset orphan cleanup, as confirmed on 2026-10-28 in `../AGENTS.md`. Duplicate-specific sections remain applicable to that mode; section 23 adds the independent orphan workflow. This is a target contract, not evidence that all interactions are implemented.
+
 ## 1. UI goals
 
 The interface must make large-scale asset cleanup:
@@ -316,7 +318,7 @@ Do not hide the fact that Unreal consolidation removes source assets and redirec
 
 Redirector cleanup is a separate post-consolidation concern.
 
-Recommended v0.1 behavior:
+Required active-stage behavior:
 
 - consolidation first;
 - verification second;
@@ -400,7 +402,7 @@ Use stable terminology throughout the UI:
 - **Preflight**: non-destructive validation immediately before execution.
 - **Consolidate**: Unreal reference replacement + removal of source assets through the supported editor consolidation API.
 
-Avoid vague destructive labels such as "Clean Everything" or "Fix All" for v0.1.
+Avoid vague destructive labels such as "Clean Everything" or "Fix All".
 
 ## 20. Performance rules
 
@@ -432,9 +434,9 @@ Slate widgets must not become the authoritative implementation of:
 
 Those belong in testable non-widget code.
 
-## 22. v0.1 screen acceptance criteria
+## 22. Duplicate screen acceptance criteria
 
-The first shippable UI is complete when a user can:
+The duplicate UI is complete when a user can:
 
 1. open a dockable Content Sanitizer tab;
 2. choose `/Game`, selected folder/assets, or custom scope;
@@ -448,3 +450,43 @@ The first shippable UI is complete when a user can:
 10. execute consolidation intentionally;
 11. see success/warnings/failures without opening raw logs;
 12. optionally perform redirector cleanup after verified consolidation.
+
+## 23. Active-stage modes and orphan workflow
+
+Provide distinct duplicate and orphan modes within the dockable tool, sharing visual conventions and session infrastructure. Scanning never mutates. Opening a context action only sets the target and opens the relevant mode. Scan/mutation concurrency must not permit one mode to act on stale results from the other; disable conflicting actions and invalidate overlapping results after mutation.
+
+Always distinguish:
+
+- cleanup target: which assets can be consolidated or deleted;
+- evidence scope: where comparisons or incoming users were checked;
+- mutation impact: which packages may change, including out-of-target references.
+
+For duplicate mode, show the canonical recommendation reason, allow manual override among proven equivalent members, and invalidate preflight after edits. Default comparison is `/Game`; prefer an equivalent asset outside the target. Preflight must expose affected package paths, not merely a total and a generic success message. Confirmation includes out-of-target impact; newly expanded impact requires renewed review.
+
+For orphan mode:
+
+1. Show textures, materials/material instances, static meshes, and skeletal meshes with type filters.
+2. Show candidate/review/blocked evidence states and reasons. Use wording such as “未发现外部引用” rather than “已证明全工程未使用” or unconditional “安全删除”.
+3. Show incoming hard/soft/management evidence, inspected coverage, protection/unknown-state reasons, and documented dynamic-use limitations in the inspector and preflight.
+4. Show material slot/binding information as a separate field/filter. Never treat it as evidence that a mesh itself is used or unused.
+5. Add selected candidates to an explicit deletion queue. Row selection alone must not execute deletion. Queue inclusion is not preflight approval.
+6. Present exact targets, expected package effects, blockers, and warnings in a read-only preflight. Failed required checks and known users cannot be overridden by confirmation.
+7. Confirm the reviewed plan with its remaining coverage limitations. Recheck current state immediately before each deletion; changed evidence or impact requires renewed review.
+8. Present not-executed, API-reported failure/possible partial change, verification failure, and verified success distinctly. Stop the queue on mutation failure and require rescan/review.
+9. Invalidate affected results in both modes and refresh summary/queue state. Display candidate size separately from eligible-plan estimated savings.
+
+Do not expose cluster analysis, dependency-chain deletion, root reachability, automatic quarantine, or recursive cleanup as available features. No “delete everything unused” action is included.
+
+Active-stage GUI acceptance covers both modes on UE 5.5 and 5.8, including folder invocation, cancellation, empty/error/stale states, plan editing, impact expansion, confirmation cancellation, and failure reporting. Automated model checks do not replace direct editor workflow verification.
+
+### Current conservative controls
+
+The panel's left pane exposes explicit target application, search, minimum estimate, candidate-only presentation, and material metadata filtering. The bottom virtualized queue permits individual removal and shows exact targets, preflight blockers and affected/out-of-target packages. Execution is separate from scan controls. Manual canonical edits invalidate queued preflight; asset changes and operations invalidate both modes and reset summaries. Unknown class and graph/protection failures remain blocked. Orphan inspector counts describe registered evidence and list observed package/manager identities, not global absence proof.
+
+Independent redirector review only permits unreferenced writable single-object packages after verified consolidation, with source control disabled. Broader redirector fix-up is not exposed. Headless widget tests construct an unattached panel to exercise scope, queue and invalidation without opening a window; they do not establish visual or direct-editor acceptance.
+
+### Shared-impact duplicate batches
+
+Queue preflight shows a batch-ready/blocked state separately from individual readiness, lists shared reference packages, and includes per-group outside-target impact in the one confirmation. Groups with overlapping member packages or inter-group dependencies are blocked before confirmation. Independent groups sharing a user package execute with verified intermediate evidence; unexpected evidence or expanded impact stops the batch.
+
+After a mutation, all old executable plans are invalidated. The outcome pane retains exact canonical/source targets and succeeded/not-executed/needs-inspection states, including untouched items. If execution made no native call, queued targets remain available for new preflight; their old confirmation is cleared. Headless tests do not establish visual acceptance of this report.
